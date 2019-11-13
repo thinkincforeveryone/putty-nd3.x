@@ -16,7 +16,6 @@
 //#include "native_putty_common.h"
 void fatalbox(const char *fmt, ...);
 
-
 class WindowInterface
 {
 public:
@@ -27,6 +26,27 @@ public:
 	
 	static WindowInterface* GetInstance(){
 		return Singleton<WindowInterface>::get();
+	}
+
+	int getTabCountInLastActiveBrowser()
+	{
+		Browser* browser = BrowserList::GetLastActive();
+		if (browser == NULL) { return 0; }
+
+		int tab_count = browser->tab_count();
+		return tab_count;
+	}
+
+	void createBrowser()
+	{
+		Browser* browser = BrowserList::GetLastActive();
+		if (browser == NULL){ return; }
+
+		int tab_count = browser->tab_count();
+		if (tab_count == 0){ return; }
+
+		Browser* new_browser = Browser::Create();
+		new_browser->window()->Show();
 	}
 
 	void createNewSession()
@@ -148,7 +168,13 @@ public:
 		return browser->window();
 	}
 
-	HWND getNativeTopWnd()
+	static HINSTANCE getMainInst()
+	{ 
+		extern HINSTANCE hinst;
+		return hinst;
+	}
+
+	static HWND getNativeTopWnd()
 	{
 		Browser* browser = BrowserList::GetLastActive();
 		if (browser == NULL)
@@ -171,6 +197,21 @@ public:
 		bw->UpdateToolbar(wrapper, should_restore_state);
 	}
 
+	void AllToolbarSizeChanged(bool should_restore_state)
+	{
+		BrowserList::const_iterator it = BrowserList::begin();
+		for (; it != BrowserList::end(); it++)
+		{
+			Browser* browser = *it;
+			if (browser == NULL) { continue; }
+			BrowserWindow* bw = browser->window();
+			if (bw == NULL) { continue; }
+
+			bw->ToolbarSizeChanged(should_restore_state);
+		}
+
+	}
+
 	enum{CMD_DEFAULT = 0, CMD_TO_ALL, CMD_TO_WITHIN_WINDOW, CMD_TO_ACTIVE_TAB};
 	void setCmdScatterState(int state){
 		if (state == cmd_scatter_state_) return;
@@ -182,8 +223,19 @@ public:
 	}
 	int getCmdScatterState(){return cmd_scatter_state_;}
 	bool ifNeedCmdScat(){return CMD_DEFAULT != getCmdScatterState();}
-	void cmdScat(int type, const char * buffer, int buflen, int interactive){
-		if (CMD_TO_ALL == getCmdScatterState()){
+	void cmdScat(int type, const char * buffer, int buflen, int interactive)
+	{
+		sendCmd(getCmdScatterState(), type, buffer, buflen, interactive);
+	}
+	static void sendScript(int state, int type, const char * buffer, int buflen, int interactive){
+		if (CMD_DEFAULT == state) {
+			Browser* browser = BrowserList::GetLastActive();
+			if (browser == NULL) { return; }
+			TabContents* tab = browser->GetSelectedTabContents();
+			if (tab == NULL) { return; }
+			tab->sendScript(type, buffer, buflen, interactive);
+		}
+		else if (CMD_TO_ALL == state){
 			BrowserList::const_iterator it = BrowserList::begin();
 			for (; it != BrowserList::end(); it++){
 				TabStripModel* tabStripModel = (*it)->tabstrip_model();
@@ -191,23 +243,65 @@ public:
 					TabContentsWrapper* tabContentsWrapper = tabStripModel->GetTabContentsAt(i);
 					if (NULL == tabContentsWrapper) continue;
 					TabContents* tab = tabContentsWrapper->tab_contents();
-					tab->cmdScat(type, buffer, buflen, interactive);
+					tab->sendScript(type, buffer, buflen, interactive);
 				}
 			}
 		}
-		else if (CMD_TO_WITHIN_WINDOW == getCmdScatterState()){
+		else if (CMD_TO_WITHIN_WINDOW == state){
 			Browser* browser = BrowserList::GetLastActive();
 			TabStripModel* tabStripModel = browser->tabstrip_model();
 			for (int i = 0; i < tabStripModel->count(); i++){
 				TabContentsWrapper* tabContentsWrapper = tabStripModel->GetTabContentsAt(i);
 				if (NULL == tabContentsWrapper) continue;
 				TabContents* tab = tabContentsWrapper->tab_contents();
+				tab->sendScript(type, buffer, buflen, interactive);
+			}
+		}
+		else if(CMD_TO_ACTIVE_TAB == state){
+			BrowserList::const_iterator it = BrowserList::begin();
+			for (; it != BrowserList::end(); it++){
+				TabStripModel* tabStripModel = (*it)->tabstrip_model();
+				TabContentsWrapper* tabContentsWrapper = tabStripModel->GetActiveTabContents();
+				if (NULL == tabContentsWrapper) continue;
+				TabContents* tab = tabContentsWrapper->tab_contents();
+				tab->sendScript(type, buffer, buflen, interactive);
+			}
+		}
+	}
+
+	static void sendCmd(int state, int type, const char * buffer, int buflen, int interactive) {
+		if (CMD_DEFAULT == state) {
+			Browser* browser = BrowserList::GetLastActive();
+			if (browser == NULL) { return; }
+			TabContents* tab = browser->GetSelectedTabContents();
+			if (tab == NULL) { return; }
+			tab->cmdScat(type, buffer, buflen, interactive);
+		}
+		else if (CMD_TO_ALL == state) {
+			BrowserList::const_iterator it = BrowserList::begin();
+			for (; it != BrowserList::end(); it++) {
+				TabStripModel* tabStripModel = (*it)->tabstrip_model();
+				for (int i = 0; i < tabStripModel->count(); i++) {
+					TabContentsWrapper* tabContentsWrapper = tabStripModel->GetTabContentsAt(i);
+					if (NULL == tabContentsWrapper) continue;
+					TabContents* tab = tabContentsWrapper->tab_contents();
+					tab->cmdScat(type, buffer, buflen, interactive);
+				}
+			}
+		}
+		else if (CMD_TO_WITHIN_WINDOW == state) {
+			Browser* browser = BrowserList::GetLastActive();
+			TabStripModel* tabStripModel = browser->tabstrip_model();
+			for (int i = 0; i < tabStripModel->count(); i++) {
+				TabContentsWrapper* tabContentsWrapper = tabStripModel->GetTabContentsAt(i);
+				if (NULL == tabContentsWrapper) continue;
+				TabContents* tab = tabContentsWrapper->tab_contents();
 				tab->cmdScat(type, buffer, buflen, interactive);
 			}
 		}
-		else if(CMD_TO_ACTIVE_TAB == getCmdScatterState()){
+		else if (CMD_TO_ACTIVE_TAB == state) {
 			BrowserList::const_iterator it = BrowserList::begin();
-			for (; it != BrowserList::end(); it++){
+			for (; it != BrowserList::end(); it++) {
 				TabStripModel* tabStripModel = (*it)->tabstrip_model();
 				TabContentsWrapper* tabContentsWrapper = tabStripModel->GetActiveTabContents();
 				if (NULL == tabContentsWrapper) continue;
@@ -239,11 +333,17 @@ public:
 	}
 	void at_exit();
 
+	void open_wait_session_in_new_window() { wait_open_sessions_.push_front(""); }
 	void push_wait_open_session(const char* session_name){wait_open_sessions_.push_back(session_name);}
 	std::string pop_wait_open_session(){ 
 		if (wait_open_sessions_.empty()){ return ""; }
 		std::string ret = *wait_open_sessions_.begin();
 		wait_open_sessions_.pop_front(); 
+
+		if (ret.length() == 0 && !wait_open_sessions_.empty()) {
+			createBrowser();
+			return pop_wait_open_session();
+		}
 		return ret;
 	}
 

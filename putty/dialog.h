@@ -37,6 +37,7 @@ enum {
     CTRL_FONTSELECT,		       /* label plus font selector */
     CTRL_LISTVIEW,		       /* label plus list box */
     CTRL_TABDELAY,		       /* see `tabdelay' below */
+    CTRL_SEPARATOR,		       /* empty separator */
 };
 
 /*
@@ -351,7 +352,8 @@ union control {
          * scroll bar if a list box entry goes off the right-hand
          * side.
          */
-        int hscroll;
+	int hscroll;
+	intorptr context2;
     } listbox;
 	struct {
 		STANDARD_PREFIX;
@@ -512,6 +514,7 @@ union control *ctrl_editbox(struct controlset *, const char *label,
                             char shortcut, int percentage, intorptr helpctx,
 			    handler_fn handler,
 			    intorptr context, intorptr context2);
+union control *ctrl_separator(struct controlset *s, intorptr context);
 union control *ctrl_combobox(struct controlset *, const char *label,
                              char shortcut, int percentage, intorptr helpctx,
 			     handler_fn handler,

@@ -182,6 +182,8 @@ typedef void *Ssh_gss_name;
 GLOBAL HWND hTopWnd;	/* the main terminal window */
 GLOBAL HWND hConfigWnd;
 GLOBAL HWND hInputWnd;
+GLOBAL HWND hCloudWnd;
+GLOBAL HWND hCmdWnd;
 //GLOBAL HWND hwnd;	/* the main terminal window */
 //GLOBAL HWND logbox;
 
@@ -482,6 +484,7 @@ const char *win_strerror(int error);
  */
 void UpdateSizeTip(HWND src, int cx, int cy);
 void EnableSizeTip(int bEnable);
+void UpdateSizeStr(HWND src, const char* str);
 
 /*
  * Exports from unicode.c.

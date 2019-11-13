@@ -265,10 +265,12 @@ public:
 	void resetSearch() const;
 	void setFocus() const;
 	void cmdScat(int type, const char * buffer, int buflen, int interactive) const;
+	void sendScript(int type, const char * buffer, int buflen, int interactive) const;
 	Conf* getCfg();
 	int getScrollToEnd();
 	void setScrollToEnd(int isScrollToEnd);
 	bool CanClose();
+	void notifyMsg(const char* msg, void* data);
 protected:
     friend class TabContentsObserver;
 

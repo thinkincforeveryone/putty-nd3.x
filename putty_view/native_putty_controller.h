@@ -6,9 +6,15 @@
 #include "putty.h"
 #include "view/view.h"
 #include "base/timer.h"
+#include <vector>
 
 class ZmodemSession;
 class NativePuttyPage;
+
+struct ParamPair{
+	WPARAM wParam;
+	LPARAM lParam;
+};
 
 class NativePuttyController{
 public:
@@ -40,6 +46,7 @@ public:
 	void send(const char* const buf, const int len);
 	enum {LDISC_SEND = -1, LUNI_SEND = -2};
 	void cmdScat(int type, const char * buffer, int buflen, int interactive);
+	void sendScript(int type, const char * buffer, int buflen, int interactive);
 	int send_buffer_size();
 	void destroy();//make fsm delete controller
 
@@ -120,8 +127,16 @@ public:
 	void closeTab();
 	void rename(const char* input_name = NULL); 
 	void rename_cfg();
+	void hide_toolbar();
 
 	HWND getNativeParentWindow(){return nativeParentWin_;}
+	bool isActive();
+	void setFrozen(bool frozen){
+		if (is_frozen && !frozen){ enact_pending_netevent(); } 
+		is_frozen = frozen;
+	}
+
+	void notifyMsg(const char* msg, void* data);
 public:
 	HWND nativeParentWin_;
 
@@ -148,6 +163,7 @@ public:
     int offset_width, offset_height;
     int caret_x, caret_y;
     int descent;
+	int font_height_by_wheel;
 
     HBITMAP caretbm;
 
@@ -194,9 +210,7 @@ public:
 	unsigned negsize;
     char **events;
 
-	int pending_netevent;
-	WPARAM pend_netevent_wParam;
-	LPARAM pend_netevent_lParam;
+	std::vector<ParamPair> pending_param_list;
 
 	static int kbd_codepage;
 	UINT last_mousemove;
@@ -209,7 +223,7 @@ public:
 
 	long next_flash;
 	int flashing;
-
+	volatile bool is_frozen;
 	
     int cursor_visible;
     int forced_visible;
@@ -217,6 +231,7 @@ public:
 	enum{TIMER_INTERVAL = 50}; //in ms
 	base::RepeatingTimer<NativePuttyController> checkTimer_;
 	static base::Lock socketTreeLock_;
+	bool isAutoCmdEnabled_;
 
 	ZmodemSession* zSession_;
 

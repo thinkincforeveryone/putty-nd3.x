@@ -830,14 +830,31 @@ static void okcancelbutton_handler(union control *ctrl, void *dlg,
 			int valid_session_num = for_grouped_session_do(session, add_launchable_session, 20);
 			if (valid_session_num > 0)
 			{
-				extern void pop_wait_open_session(char* session_name, int len);
-				char wait_session[256] = { 0 };
-				pop_wait_open_session(wait_session, sizeof(wait_session)-1);
-				load_settings(wait_session, cfg);
-				dlg_end(dlg, 1);
+				int ctrl_pressed = 0;
+				BYTE keystate[256];
+				if (GetKeyboardState(keystate) != 0)
+				{
+					ctrl_pressed = (keystate[VK_CONTROL] & 0x80);
+				}
 
+				extern int get_tab_count_in_last_active_browser();
+				extern void open_wait_session_in_new_window();
 				extern void schedule_open_wait_sessions(int microseconds);
-				schedule_open_wait_sessions(500000);
+				if (!ctrl_pressed && get_tab_count_in_last_active_browser() > 0) {
+					dlg_end(dlg, 0);
+					open_wait_session_in_new_window();
+					schedule_open_wait_sessions(100000);
+				}
+				else
+				{
+					extern void pop_wait_open_session(char* session_name, int len);
+					char wait_session[256] = { 0 };
+					pop_wait_open_session(wait_session, sizeof(wait_session) - 1);
+					load_settings(wait_session, cfg);
+					dlg_end(dlg, 1);
+
+					schedule_open_wait_sessions(500000);
+				}
 			}
 			else
 			{
@@ -1048,7 +1065,7 @@ static void charclass_handler(union control *ctrl, void *dlg,
 }
 
 void dlg_listview_set_caption_if_not_exist(union control *ctrl, void *dlg, int col, char* text, int width);
-void dlg_listview_set_text(union control *ctrl, void *dlg, int row, int col, char* text);
+void dlg_listview_set_text(union control *ctrl, void *dlg, int row, int col, char* text, int bg_gray = 255, int text_color = 0);
 void dlg_listview_select_item(union control *ctrl, void *dlg, int row);
 static void automate_logon_handler(union control *ctrl, void *dlg,
 	void *data, int event)
@@ -1069,12 +1086,13 @@ static void automate_logon_handler(union control *ctrl, void *dlg,
 			int autocmd_enable = 0;
 			bool exist = conf_try_get_int_int(cfg, CONF_autocmd_enable, i, autocmd_enable);
 			if (!exist){ break; }
+			int text_color = autocmd_enable == 0 ? RGB(128, 128, 128) : 0;
 			itoa(i, buf, 10);
-			dlg_listview_set_text(ctrl, dlg, i, 0, buf);
-			dlg_listview_set_text(ctrl, dlg, i, 1, autocmd_enable == 0 ? "N" : "Y");
+			dlg_listview_set_text(ctrl, dlg, i, 0, buf, 255, text_color);
+			dlg_listview_set_text(ctrl, dlg, i, 1, autocmd_enable == 0 ? "N" : "Y", 255, autocmd_enable == 0 ? RGB(255, 0, 0):0);
 
 			char* expect = conf_get_int_str(cfg, CONF_expect, i);
-			dlg_listview_set_text(ctrl, dlg, i, 2, expect);
+			dlg_listview_set_text(ctrl, dlg, i, 2, expect, 255, text_color);
 
 			int hide = conf_get_int_int(cfg, CONF_autocmd_hide, i);
 			char* cmd = conf_get_int_str(cfg, CONF_autocmd, i);
@@ -1084,12 +1102,12 @@ static void automate_logon_handler(union control *ctrl, void *dlg,
 				if (len > 4000){ len = 4000; }
 				for (int j = 0; j < len; j++){ show_cmd[j] = '*'; }
 				show_cmd[len] = '\0';
-				dlg_listview_set_text(ctrl, dlg, i, 3, show_cmd);
+				dlg_listview_set_text(ctrl, dlg, i, 3, show_cmd, 255, text_color);
 			}
 			else{
-				dlg_listview_set_text(ctrl, dlg, i, 3, cmd);
+				dlg_listview_set_text(ctrl, dlg, i, 3, cmd, 255, text_color);
 			}
-			dlg_listview_set_text(ctrl, dlg, i, 4, hide == 0 ? "N" : "Y");
+			dlg_listview_set_text(ctrl, dlg, i, 4, hide == 0 ? "N" : "Y", 255, text_color);
 		}
 	}
 	else if (event == EVENT_ACTION)
@@ -2089,6 +2107,9 @@ void setup_config_box(struct controlbox *b, int midsession,
 		      "Auto", I(AUTO),
 		      "Force on", I(FORCE_ON),
 		      "Force off", I(FORCE_OFF), NULL);
+	ctrl_editbox(s, "Line Paste Delay(ms)", '\0', 50,
+		HELPCTX(no_help),
+		conf_editbox_handler, I(CONF_paste_delay), I(-1));
 
     s = ctrl_getset(b, "Terminal", "printing", "Remote-controlled printing");
     ctrl_combobox(s, "Printer to send ANSI printer output to:", 'p', 100,
@@ -2462,6 +2483,11 @@ void setup_config_box(struct controlbox *b, int midsession,
 		     conf_editbox_handler, I(CONF_ping_interval),
 		     I(-1));
 
+	s = ctrl_getset(b, "Connection", "auto-reconnect", "Auto Reconnect");
+	ctrl_checkbox(s, "Auto ReConnect",
+		'\0', HELPCTX(no_help),
+		conf_checkbox_handler,
+		I(CONF_auto_reconnect));
 	if (!midsession) {
 	    s = ctrl_getset(b, "Connection", "tcp",
 			    "Low-level TCP connection options");
@@ -3082,13 +3108,17 @@ void setup_config_box(struct controlbox *b, int midsession,
 	pfd->listbox = ctrl_listbox(s, NULL, NO_SHORTCUT,
 				    HELPCTX(ssh_tunnels_portfwd),
 				    portfwd_handler, P(pfd));
-	pfd->listbox->listbox.height = 3;
+	pfd->listbox->listbox.height = 16;
 	pfd->listbox->listbox.ncols = 2;
 	pfd->listbox->listbox.percentages = snewn(2, int);
 	pfd->listbox->listbox.percentages[0] = 20;
 	pfd->listbox->listbox.percentages[1] = 80;
 	ctrl_tabdelay(s, pfd->rembutton);
 	ctrl_text(s, "Add new forwarded port:", HELPCTX(ssh_tunnels_portfwd));
+	pfd->sourcebox = ctrl_editbox(s, "Source port", 's', 40,
+				      HELPCTX(ssh_tunnels_portfwd),
+				      portfwd_handler, P(pfd), P(NULL));
+	pfd->sourcebox->generic.column = 0;
 	/* You want to enter source, destination and type, _then_ hit Add.
 	 * Again, we adjust the tab order to reflect this. */
 	pfd->addbutton = ctrl_pushbutton(s, "Add", 'd',
@@ -3096,10 +3126,6 @@ void setup_config_box(struct controlbox *b, int midsession,
 					 portfwd_handler, P(pfd));
 	pfd->addbutton->generic.column = 2;
 	pfd->addbutton->generic.tabdelay = 1;
-	pfd->sourcebox = ctrl_editbox(s, "Source port", 's', 40,
-				      HELPCTX(ssh_tunnels_portfwd),
-				      portfwd_handler, P(pfd), P(NULL));
-	pfd->sourcebox->generic.column = 0;
 	pfd->destbox = ctrl_editbox(s, "Destination", 'i', 67,
 				    HELPCTX(ssh_tunnels_portfwd),
 				    portfwd_handler, P(pfd), P(NULL));

@@ -20,6 +20,7 @@
 #define IDM_RECONF    0x0050
 #define IDM_CLRSB     0x0060
 #define IDM_RESET     0x0070
+#define IDM_RENAME    0x0080
 #define IDM_HELP      0x0140
 #define IDM_ABOUT     0x0150
 #define IDM_SAVEDSESS 0x0160
@@ -33,6 +34,7 @@
 #define IDM_SEARCH_R  0x0240
 #define IDM_TAB_SHORTCUT  0x0250
 #define IDM_START_STOP_LOG  0x0260
+#define IDM_SHOW_CMD_DLG    0x0270
 
 #define IDM_SPECIAL_MIN 0x0400
 #define IDM_SPECIAL_MAX 0x0800

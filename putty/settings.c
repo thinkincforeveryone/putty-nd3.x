@@ -11,6 +11,14 @@
 
 #include <map>
 #include <string>
+#include <vector>
+#include <algorithm>  
+#include "../rapidjson/document.h"
+#include "../rapidjson/writer.h"
+#include "../rapidjson/stringbuffer.h"
+
+using namespace rapidjson;
+
 std::map<std::string, int> DEFAULT_INT_VALUE;
 std::map<std::string, std::string> DEFAULT_STR_VALUE;
 bool isInited = false;
@@ -450,8 +458,7 @@ char *save_settings(const char *section, Conf *conf)
     char *errmsg;
 
 	if (section == NULL || section[0] == NULL){ return NULL; }
-	int isdef = /*!strcmp(section, DEFAULT_SESSION_NAME)||*/ !strcmp(section, START_LOCAL_SSH_SERVER_NAME) || !strcmp(section, LOCAL_SSH_SESSION_NAME);
-	if (isdef){ return NULL; }
+	if (cannot_save_session(section)) return NULL;;
 
 	TmplStore tmpl_store(gStorage);
 	tmpl_store.del_settings_only(section);
@@ -693,8 +700,9 @@ void save_open_settings(IStore* iStorage, void *sesskey, Conf *conf)
 	iStorage->write_setting_i(sesskey, "NoRemoteTabName", conf_get_int(conf, CONF_no_remote_tabname));
 	iStorage->write_setting_i(sesskey, "NoRemoteTabNameInIcon", conf_get_int(conf, CONF_no_remote_tabname_in_icon));
     iStorage->write_setting_i(sesskey, "LinesAtAScroll", conf_get_int(conf, CONF_scrolllines));
+    iStorage->write_setting_i(sesskey, "PasteDelay", conf_get_int(conf, CONF_paste_delay));
 	for (i = 0; i < AUTOCMD_COUNT; i++){
-		char buf[20];
+		char buf[64];
 		int autocmd_enable = 0;
 		bool exist = conf_try_get_int_int(conf, CONF_autocmd_enable, i, autocmd_enable);
 		if (!exist){ 
@@ -711,23 +719,23 @@ void save_open_settings(IStore* iStorage, void *sesskey, Conf *conf)
 			char encryptStr[128] = {0};
 			if (DES_Encrypt2Char(conf_get_int_str(conf, CONF_autocmd, i) ,PSWD, encryptStr)){
 				conf_set_int_int(conf, CONF_autocmd_encrypted, i, 1);
-				sprintf(buf, "AutocmdEncrypted%d", i);
-				iStorage->write_setting_i(sesskey, buf, 1);
 				sprintf(buf, "Autocmd%d", i);
 				iStorage->write_setting_s(sesskey, buf, encryptStr);
+				sprintf(buf, "AutocmdEncrypted%d", i);
+				iStorage->write_setting_i(sesskey, buf, 1);
 			}else{
+				sprintf(buf, "Autocmd%d", i);
+		        iStorage->write_setting_s(sesskey, buf, conf_get_int_str(conf, CONF_autocmd, i));
 				conf_set_int_int(conf, CONF_autocmd_encrypted, i, 0);
 				sprintf(buf, "AutocmdEncrypted%d", i);
 				iStorage->write_setting_i(sesskey, buf, 0);
-				sprintf(buf, "Autocmd%d", i);
-		        iStorage->write_setting_s(sesskey, buf, conf_get_int_str(conf, CONF_autocmd, i));
 			}
 		}else{
 			conf_set_int_int(conf, CONF_autocmd_encrypted, i, 0);
-			sprintf(buf, "AutocmdEncrypted%d", i);
-			iStorage->write_setting_i(sesskey, buf, 0);
 			sprintf(buf, "Autocmd%d", i);
 			iStorage->write_setting_s(sesskey, buf, conf_get_int_str(conf, CONF_autocmd, i));
+			sprintf(buf, "AutocmdEncrypted%d", i);
+			iStorage->write_setting_i(sesskey, buf, 0);
 		}
 		
         sprintf(buf, "AutocmdHide%d", i);
@@ -741,6 +749,7 @@ void save_open_settings(IStore* iStorage, void *sesskey, Conf *conf)
 
 	iStorage->write_setting_i(sesskey, "DataVersion", conf_get_int(conf, CONF_data_version));
 	iStorage->write_setting_i(sesskey, "GroupCollapse", conf_get_int(conf, CONF_group_collapse));
+	iStorage->write_setting_i(sesskey, "AutoReconnect", conf_get_int(conf, CONF_auto_reconnect));
 }
 
 void load_settings_from_mem(const char *section, Conf *conf, const char* content)
@@ -890,6 +899,10 @@ void load_open_settings(IStore* iStorage, void *sesskey, Conf *conf)
     conf_set_str(conf, CONF_remote_cmd, "");
     conf_set_str(conf, CONF_remote_cmd2, "");
     conf_set_str(conf, CONF_ssh_nc_host, "");
+    conf_set_str(conf, CONF_password, "");
+	conf_set_int(conf, CONF_autocmd_index, 0);
+	conf_set_int(conf, CONF_autocmd_try, 0);
+	conf_set_int(conf, CONF_autocmd_last_lineno, 0);
 
     gpps(iStorage, sesskey, "HostName", "", conf, CONF_host);
     gppfile(iStorage, sesskey, "LogFileName", conf, CONF_logfilename);
@@ -1227,11 +1240,12 @@ void load_open_settings(IStore* iStorage, void *sesskey, Conf *conf)
 	gppi(iStorage, sesskey, "NoRemoteTabName", 0, conf, CONF_no_remote_tabname);
 	gppi(iStorage, sesskey, "NoRemoteTabNameInIcon", 1, conf, CONF_no_remote_tabname_in_icon);
 	gppi(iStorage, sesskey, "LinesAtAScroll", 3, conf, CONF_scrolllines);
+	gppi(iStorage, sesskey, "PasteDelay", 0, conf, CONF_paste_delay);
 	int autocmd_count = gppi_raw(iStorage, sesskey, "AutocmdCount", AUTOCMD_COUNT);
 	for (i = 0; i < autocmd_count; i++){
-        char buf[20];
+        char buf[64];
         sprintf(buf, "AutocmdEnable%d", i);
-		int default_enable = i > 1 ? -1 : 0;
+		int default_enable = i > 1 ? -1 : 1;
 
 		int autocmd_enabled = gppi_raw(iStorage, sesskey, buf, default_enable);
 		if (autocmd_enabled < 0){ break; }
@@ -1279,6 +1293,7 @@ void load_open_settings(IStore* iStorage, void *sesskey, Conf *conf)
 	gppi(iStorage, sesskey, "AdbCompelCRLF", 1, conf, CONF_adb_compel_crlf);
 	gppi(iStorage, sesskey, "DataVersion", 1, conf, CONF_data_version);
 	gppi(iStorage, sesskey, "GroupCollapse", 1, conf, CONF_group_collapse);
+	gppi(iStorage, sesskey, "AutoReconnect", 0, conf, CONF_auto_reconnect);
 
 	if (!isInited){
 		DEFAULT_STR_VALUE["TerminalModes"] = "CS7=A,CS8=A,DISCARD=A,DSUSP=A,ECHO=A,ECHOCTL=A,ECHOE=A,ECHOK=A,ECHOKE=A,ECHONL=A,EOF=A,EOL=A,EOL2=A,ERASE=A,FLUSH=A,ICANON=A,ICRNL=A,IEXTEN=A,IGNCR=A,IGNPAR=A,IMAXBEL=A,INLCR=A,INPCK=A,INTR=A,ISIG=A,ISTRIP=A,IUCLC=A,IXANY=A,IXOFF=A,IXON=A,KILL=A,LNEXT=A,NOFLSH=A,OCRNL=A,OLCUC=A,ONLCR=A,ONLRET=A,ONOCR=A,OPOST=A,PARENB=A,PARMRK=A,PARODD=A,PENDIN=A,QUIT=A,REPRINT=A,START=A,STATUS=A,STOP=A,SUSP=A,SWTCH=A,TOSTOP=A,WERASE=A,XCASE=A";
@@ -1345,11 +1360,13 @@ void do_defaults(const char *session, Conf *conf)
     load_settings(session, conf);
 }
 
-static int sessioncmp(const void *av, const void *bv)
+int sessioncmp(const void *av, const void *bv)
 {
     const char *a = *(const char *const *) av;
     const char *b = *(const char *const *) bv;
 
+	int ret = strcmp(a, b);
+	if (ret == 0) { return 0; }
     /*
      * Alphabetical order, except that "Default Settings" is a
      * special case and comes first.
@@ -1358,6 +1375,11 @@ static int sessioncmp(const void *av, const void *bv)
 	return -1;		       /* a comes first */
     if (!strcmp(b, DEFAULT_SESSION_NAME))
 	return +1;		       /* b comes first */
+
+	if (!strcmp(a, GLOBAL_SESSION_NAME))
+	return -1;		       /* a comes first */
+	if (!strcmp(b, GLOBAL_SESSION_NAME))
+	return +1;	
 
 	if (!strcmp(a, ANDROID_DIR_FOLDER_NAME))
 		return -1;		       /* a comes first */
@@ -1372,7 +1394,70 @@ static int sessioncmp(const void *av, const void *bv)
      * FIXME: perhaps we should ignore the first & in determining
      * sort order.
      */
-    return strcmp(a, b);	       /* otherwise, compare normally */
+    return ret;	       /* otherwise, compare normally */
+}
+
+int cmdcmp(const std::string& av, const std::string& bv)
+{
+	const char *a = av.c_str();
+	const char *b = bv.c_str();
+
+	int ret = strcmp(a, b);
+	if (ret == 0) { return 0; }
+
+	/*
+	* Alphabetical order, except that "Default Settings" is a
+	* special case and comes first.
+	*/
+	if (!strcmp(a, TMP_CMD_NAME))
+		return -1;		       /* a comes first */
+	if (!strcmp(b, TMP_CMD_NAME))
+		return +1;		       /* b comes first */
+
+	/*
+	* FIXME: perhaps we should ignore the first & in determining
+	* sort order.
+	*/
+	return ret;	       /* otherwise, compare normally */
+}
+
+bool cmdstdcmp(const std::string& av, const std::string& bv)
+{
+	return cmdcmp(av, bv) < 0;	       /* otherwise, compare normally */
+}
+
+bool cmdstdeq(const std::string& av, const std::string& bv)
+{
+	return cmdcmp(av, bv) == 0;	       /* otherwise, compare normally */
+}
+
+bool is_pre_defined_session(const char* session_name)
+{
+	return !strcmp(session_name, GLOBAL_SESSION_NAME) 
+		|| !strcmp(session_name, DEFAULT_SESSION_NAME) 
+		|| !strcmp(session_name, ANDROID_DIR_FOLDER_NAME)
+		|| !strcmp(session_name, START_LOCAL_SSH_SERVER_NAME)
+		|| !strcmp(session_name, LOCAL_SSH_SESSION_NAME);
+}
+
+bool cannot_save_session(const char* session_name)
+{
+	return !strcmp(session_name, GLOBAL_SESSION_NAME)
+		|| !strcmp(session_name, START_LOCAL_SSH_SERVER_NAME)
+		|| !strcmp(session_name, saved_cmd_settings_folder)
+		|| !strcmp(session_name, TMP_CMD_SESSION)
+		|| !strcmp(session_name, LOCAL_SSH_SESSION_NAME);
+}
+
+bool is_pre_defined_cmd(const char* cmd_name)
+{
+	return !strcmp(cmd_name, TMP_CMD_NAME);
+}
+
+bool cannot_save_cmd(const char* cmd_name)
+{
+	return strlen(cmd_name) == 0
+		|| !strcmp(cmd_name, TMP_CMD_NAME);
 }
 
 void get_sesslist(struct sesslist *list, int allocate)
@@ -1410,12 +1495,11 @@ void get_sesslist(struct sesslist *list, int allocate)
 	 * doesn't really.
 	 */
 
-	const int DEFAULT_SESSION_NUM = 4;
+	const int DEFAULT_SESSION_NUM = 5;
 	p = list->buffer;
 	list->nsessions = DEFAULT_SESSION_NUM;	       /* "Default Settings" counts as one */
 	while (*p) {
-		if (strcmp(p, "Default Settings") && strcmp(p, ANDROID_DIR_FOLDER_NAME)
-			&& strcmp(p, START_LOCAL_SSH_SERVER_NAME) && strcmp(p, LOCAL_SSH_SESSION_NAME))
+		if (!is_pre_defined_session(p))
 		list->nsessions++;
 	    while (*p)
 		p++;
@@ -1423,15 +1507,15 @@ void get_sesslist(struct sesslist *list, int allocate)
 	}
 
 	list->sessions = snewn(list->nsessions + 1, char *);
-	list->sessions[0] = "Default Settings";
-	list->sessions[1] = ANDROID_DIR_FOLDER_NAME;
-	list->sessions[2] = START_LOCAL_SSH_SERVER_NAME;
-	list->sessions[3] = LOCAL_SSH_SESSION_NAME;
+	list->sessions[0] = GLOBAL_SESSION_NAME;
+	list->sessions[1] = DEFAULT_SESSION_NAME;
+	list->sessions[2] = ANDROID_DIR_FOLDER_NAME;
+	list->sessions[3] = START_LOCAL_SSH_SERVER_NAME;
+	list->sessions[4] = LOCAL_SSH_SESSION_NAME;
 	p = list->buffer;
 	i = DEFAULT_SESSION_NUM;
 	while (*p) {
-		if (strcmp(p, "Default Settings") && strcmp(p, ANDROID_DIR_FOLDER_NAME)
-			&& strcmp(p, START_LOCAL_SSH_SERVER_NAME) && strcmp(p, LOCAL_SSH_SESSION_NAME)){
+		if ((!is_pre_defined_session(p))){
 			list->sessions[i++] = p;
 		}
 	    while (*p)
@@ -1448,6 +1532,33 @@ void get_sesslist(struct sesslist *list, int allocate)
     }
 }
 
+bool is_cmd_session(const char* cmd_name)
+{
+	return memcmp(cmd_name, saved_cmd_settings_folder, sizeof(saved_cmd_settings_folder)-1) == 0;
+}
+
+void get_cmdlist(std::vector<std::string>& cmdlist)
+{
+	char otherbuf[2048];
+	void *handle;
+	char *ret;
+
+	cmdlist.push_back(TMP_CMD_NAME);
+	if ((handle = gStorage->enum_cmd_start()) != NULL) {
+		do {
+			memset(otherbuf, 0, sizeof(otherbuf));
+			ret = gStorage->enum_cmd_next(handle, otherbuf, sizeof(otherbuf));
+			if (ret) {
+				cmdlist.push_back(otherbuf);
+			}
+		} while (ret);
+		gStorage->enum_cmd_finish(handle);
+	}
+	std::sort(cmdlist.begin(), cmdlist.end(), cmdstdcmp);
+	std::vector<std::string>::iterator sortLast = std::unique(cmdlist.begin(), cmdlist.end(), cmdstdeq);
+	cmdlist.resize(std::distance(cmdlist.begin(), sortLast));
+}
+
 char *backup_settings(const char *section,const char* path)
 {
     void *sesskey;
@@ -1455,9 +1566,7 @@ char *backup_settings(const char *section,const char* path)
 	FileStore fileStore(path);
 	Conf* cfg = conf_new();
 
-    if (!strcmp(section, DEFAULT_SESSION_NAME)) return NULL;
-	if (!strcmp(section, START_LOCAL_SSH_SERVER_NAME)) return NULL;
-	if (!strcmp(section, LOCAL_SSH_SESSION_NAME)) return NULL;
+	if (cannot_save_session(section)) return NULL;
 
     sesskey = fileStore.open_settings_w(section, &errmsg);
     if (!sesskey)
@@ -1469,10 +1578,134 @@ char *backup_settings(const char *section,const char* path)
     return NULL;
 }
 
+char* load_global_ssetting(char* setting, const char* def)
+{
+	void *sesskey = gStorage->open_global_settings();
+	char *ret = gStorage->read_setting_s(sesskey, setting);
+	gStorage->close_settings_r(sesskey);
+	return ret == NULL ? dupstr(def) : ret ;
+}
+
+void save_global_ssetting(char* setting, const char* value)
+{
+	void *sesskey = gStorage->open_global_settings();
+	if (!sesskey)
+		return ;
+	gStorage->write_setting_s(sesskey, setting, value);
+	gStorage->close_settings_w(sesskey);
+}
+
+int load_global_isetting(char* setting, int def)
+{
+	void *sesskey = gStorage->open_global_settings();
+	int ret = gStorage->read_setting_i(sesskey, setting, def);
+	gStorage->close_settings_r(sesskey);
+	return ret;
+}
+
+char* savedcmd_to_string(const SavedCmd& cmd)
+{
+	Document d;
+	d.SetObject();
+	Value script(StringRef(cmd.scripts.c_str(), cmd.scripts.length()));
+	Value replace(StringRef(cmd.replace.c_str(), cmd.replace.length()));
+
+	d.AddMember("scripts", script, d.GetAllocator());
+	d.AddMember("replace", replace, d.GetAllocator());
+
+	StringBuffer buffer;
+	Writer<StringBuffer> writer(buffer);
+	d.Accept(writer);
+	return dupstr(buffer.GetString());
+}
+
+void string_to_savedcmd(const char * content, SavedCmd& cmd)
+{
+	cmd.scripts.clear();
+	cmd.replace.clear();
+
+	if (content == NULL) { return; }
+	
+	Document d;
+	d.Parse(content);
+
+	if (!d.HasMember("scripts") || !d.HasMember("replace") || !d["scripts"].IsString() || !d["replace"].IsString())
+	{
+		return;
+	}
+	cmd.scripts = d["scripts"].GetString();
+	cmd.replace = d["replace"].GetString();
+}
+
+void load_cmd_settings(const char* cmd_name, SavedCmd& cmd)
+{
+	cmd.scripts.clear();
+	cmd.replace.clear();
+
+	char fullname[2048] = { 0 };
+	if (strlen(cmd_name) > 1024) { return; }
+	snprintf(fullname, sizeof(fullname) - 1, "%s%s", saved_cmd_settings_key, cmd_name);
+
+	char* p = snewn(3 * strlen(fullname) + 1, char);
+	WinRegStore::mungestr(fullname, p);
+	char* content = load_global_ssetting(p, NULL);
+	sfree(p);
+	string_to_savedcmd(content, cmd);
+	sfree(content);
+}
+
+void save_cmd_settings(const char* cmd_name, const SavedCmd& cmd)
+{
+	if (cannot_save_cmd(cmd_name)) { return; }
+	char fullname[2048] = { 0 };
+	if (strlen(cmd_name) > 1024) { return; }
+	snprintf(fullname, sizeof(fullname) - 1, "%s%s", saved_cmd_settings_key, cmd_name);
+
+	char* content = savedcmd_to_string(cmd);
+
+	char* p = snewn(3 * strlen(fullname) + 1, char);
+	WinRegStore::mungestr(fullname, p);
+	save_global_ssetting(p, content);
+	sfree(p);
+	sfree(content);
+}
+
+void move_cmd_settings(const char* fromcmd, const char* tocmd)
+{
+	SavedCmd cmd;
+	load_cmd_settings(fromcmd, cmd);
+	gStorage->del_cmd_settings(fromcmd);
+	save_cmd_settings(tocmd, cmd);
+}
+
+void save_global_isetting(char* setting, int value)
+{
+	void *sesskey = gStorage->open_global_settings();
+	if (!sesskey)
+		return;
+	gStorage->write_setting_i(sesskey, setting, value);
+	gStorage->close_settings_w(sesskey);
+}
+
 char* load_ssetting(const char *section, char* setting, const char* def)
 {
 	TmplStore tmpl_store(gStorage);
 	return tmpl_store.load_ssetting(section, setting, def);
+}
+
+char* save_ssetting(const char *section, char* setting, const char* value)
+{
+	void *sesskey;
+	char *errmsg;
+
+	if (!setting || !*setting)
+		return NULL;
+	sesskey = gStorage->open_settings_w(section, &errmsg);
+	if (!sesskey)
+		return errmsg;
+	gStorage->write_setting_s(sesskey, setting, value);
+	gStorage->close_settings_w(sesskey);
+	return NULL;
 }
 
 int load_isetting(const char *section, char* setting, int defvalue)
@@ -1491,7 +1724,7 @@ char *save_isetting(const char *section, char* setting, int value)
     void *sesskey;
     char *errmsg;
 
-    if (!strcmp(section, DEFAULT_SESSION_NAME) || !setting || !*setting) 
+    if (!setting || !*setting) 
         return NULL;
     sesskey = gStorage->open_settings_w(section, &errmsg);
     if (!sesskey)

@@ -592,7 +592,8 @@ void BaseTab::ShowContextMenuForView(view::View* source,
 {
     if(controller() && !closing())
     {
-        controller()->ShowContextMenuForTab(this, p);
+		controller()->SelectTab(this);
+        controller()->ShowPopupMenuForTab(this, p);
     }
 }
 

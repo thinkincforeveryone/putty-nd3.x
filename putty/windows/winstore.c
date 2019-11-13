@@ -26,6 +26,7 @@ extern IStore* gStorage = &winRegStore;
 static const char *const reg_jumplist_key = PUTTY_REG_POS "\\Jumplist";
 static const char *const reg_jumplist_value = "Recent sessions";
 static const char *const puttystr = PUTTY_REG_POS "\\Sessions";
+static const char *const global_settings_key = PUTTY_REG_POS "\\GlobalSettings";
 
 static const char hex[17] = "0123456789ABCDEF";
 
@@ -77,6 +78,19 @@ void WinRegStore::unmungestr(const char *in, char *out, int outlen)
     }
     *out = '\0';
     return;
+}
+
+void *WinRegStore::open_global_settings()
+{
+	HKEY sesskey;
+	int ret;
+
+	ret = RegCreateKey(HKEY_CURRENT_USER, global_settings_key, &sesskey);
+	if (ret != ERROR_SUCCESS) {
+		return NULL;
+	}
+	
+	return (void *)sesskey;
 }
 
 void *WinRegStore::open_settings_w(const char *sessionname, char **errmsg)
@@ -391,6 +405,75 @@ void WinRegStore::enum_settings_finish(void *handle)
     struct enumsettings *e = (struct enumsettings *) handle;
     RegCloseKey(e->key);
     sfree(e);
+}
+
+void *WinRegStore::enum_cmd_start(void)
+{
+	struct enumsettings *ret;
+	HKEY key;
+
+	if (RegOpenKey(HKEY_CURRENT_USER, global_settings_key, &key) != ERROR_SUCCESS)
+		return NULL;
+
+	ret = snew(struct enumsettings);
+	if (ret) {
+		ret->key = key;
+		ret->i = 0;
+	}
+
+	return ret;
+}
+
+char *WinRegStore::enum_cmd_next(void *handle, char *buffer, int buflen)
+{
+	struct enumsettings *e = (struct enumsettings *) handle;
+	char *otherbuf;
+	DWORD  otherbuflen = 3 * buflen;
+	otherbuf = snewn(3 * buflen, char);
+	if (RegEnumValue(e->key, e->i++, otherbuf, &otherbuflen, 0, NULL, NULL, NULL) == ERROR_SUCCESS) {
+		unmungestr(otherbuf, buffer, buflen);
+		sfree(otherbuf);
+		int key_prefix_len = strlen(saved_cmd_settings_key);
+		if (memcmp(saved_cmd_settings_key, buffer, key_prefix_len) == 0 && key_prefix_len < strlen(buffer))
+		{
+			memcpy(buffer, buffer + key_prefix_len, strlen(buffer) - key_prefix_len + 1);
+			return buffer;
+		}
+		else
+		{
+			return enum_cmd_next(handle, buffer, buflen);
+		}
+	}
+	else {
+		sfree(otherbuf);
+		return NULL;
+	}
+}
+
+void WinRegStore::enum_cmd_finish(void *handle)
+{
+	struct enumsettings *e = (struct enumsettings *) handle;
+	RegCloseKey(e->key);
+	sfree(e);
+}
+
+void WinRegStore::del_cmd_settings(const char *cmd_name)
+{ 
+	HKEY subkey1;
+	char *p;
+	char fullname[2048] = { 0 };
+	if (strlen(cmd_name) > 1024) { return; }
+	snprintf(fullname, sizeof(fullname) - 1, "%s%s", saved_cmd_settings_key, cmd_name);
+
+	if (RegOpenKey(HKEY_CURRENT_USER, global_settings_key, &subkey1) != ERROR_SUCCESS)
+		return;
+
+	p = snewn(3 * strlen(fullname) + 1, char);
+	mungestr(fullname, p);
+	RegDeleteValue(subkey1, p);
+	sfree(p);
+
+	RegCloseKey(subkey1);
 }
 
 static void hostkey_regname(char *buffer, const char *hostname,

@@ -15,6 +15,7 @@
 #define AUTOCMD_COUNT 600
 #define DEFAULT_SESSION_NAME "Default Settings"
 
+
 /*
  * Global variables. Most modules declare these `extern', but
  * window.c will do `#define PUTTY_DO_GLOBALS' before including this
@@ -35,6 +36,13 @@ typedef struct backend_tag Backend;
 typedef struct terminal_tag Terminal;
 #endif
 
+#include <string>
+struct SavedCmd
+{
+	std::string scripts;
+	std::string replace;
+};
+
 #ifdef OUTSIDE_PUTTY
 typedef HDC Context;
 #else
@@ -52,6 +60,48 @@ typedef HDC Context;
 #define LOCAL_SSH_SESSION_NAME "Android Device#_localhost"
 #define OTHER_SESSION_NAME "SessionsFromOthers#"
 #define ANDROID_SETTING_NAME " ADB Manager"
+
+#define GLOBAL_SESSION_NAME "Global Settings"
+#define SHORTCUT_SETTING_NAME " Global Shotcuts"
+#define BUGS_SETTING_NAME " Global Bugs"
+#define DISABLE_WINDOWS_NATIVE_THEME_KEY "DisableWindowsNativeTheme"
+#define ACCESS_TOKEN_SETTING_KEY "Gat"
+#define REFRESH_TOKEN_SETTING_KEY "Grt"
+#define IF_SHOW_TOOLBAR_SETTING "IsShowToolbar"
+
+#define TMP_CMD_NAME "Default Temp Scripts"
+#define TMP_CMD_SESSION "__SavedCmds#Default Temp Scripts"
+static const char *const saved_cmd_settings_key = "SavedCmds#";
+static const char *const saved_cmd_settings_folder = "__SavedCmds#";
+
+#define SHORTCUT_KEY_SELECT_TAB "ShortcutKeySelectTab"
+#define SHORTCUT_KEY_SELECT_NEXT_TAB "ShortcutKeySelectNextTab"
+#define SHORTCUT_KEY_SELECT_PRE_TAB "ShortcutKeySelectPreTab"
+#define SHORTCUT_KEY_DUP_TAB "ShortcutKeyDupTab"
+#define SHORTCUT_KEY_NEW_TAB "ShortcutKeyNewTab"
+#define SHORTCUT_KEY_RELOAD_TAB "ShortcutKeyReloadTab"
+#define SHORTCUT_KEY_EDIT_TAB_TITLE "ShortcutKeyEditTabTitle"
+#define SHORTCUT_KEY_RENAME_SESSION "ShortcutKeyRenameSession"
+#define SHORTCUT_KEY_HIDE_SHOW_TOOLBAR "ShortcutKeyHideShowToolbar"
+#define SHORTCUT_KEY_CLOSE_TAB "ShortcutKeyCloseTab"
+static const char* all_mainwin_shortcut_key_str[] = {
+	SHORTCUT_KEY_SELECT_TAB,
+	SHORTCUT_KEY_SELECT_NEXT_TAB,
+	SHORTCUT_KEY_SELECT_PRE_TAB,
+	SHORTCUT_KEY_DUP_TAB,
+	SHORTCUT_KEY_NEW_TAB,
+	SHORTCUT_KEY_RELOAD_TAB,
+	SHORTCUT_KEY_EDIT_TAB_TITLE,
+	//SHORTCUT_KEY_RENAME_SESSION,
+	SHORTCUT_KEY_HIDE_SHOW_TOOLBAR,
+	SHORTCUT_KEY_CLOSE_TAB,
+};
+static const int all_mainwin_shortcut_key_count = sizeof(all_mainwin_shortcut_key_str) / sizeof(all_mainwin_shortcut_key_str[0]);
+enum SHORTCUT_KEY_TYPE{ ALT = 0, CTRL = 1, CTRL_SHIFT = 2, F1 = 3, F2 = 4, F3 = 5, F4 = 6, F5 = 7, F6 = 8, F7 = 9, F8 = 10, F9 = 11, F10 = 12, F11 = 13, F12 = 14, 
+	MASK_ALL = -1, MASK_NO_FN = (1 << ALT) | (1 << CTRL) | (1 << CTRL_SHIFT),
+};
+static const char* all_shortcut_type_str[] = { "Alt+", "Ctrl+", "Ctrl+Shift+", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12" };
+static const int all_key_type_count = sizeof(all_shortcut_type_str) / sizeof(all_shortcut_type_str[0]);
 
 /*
  * Fingerprints of the PGP master keys that can be used to establish a trust
@@ -742,6 +792,7 @@ void cleanup_exit(int);
     X(STR, STR, ttymodes) /* values are "Vvalue" or "A" */ \
     X(STR, STR, environmt) \
     X(STR, NONE, username) \
+    X(STR, NONE, password) \
     X(INT, NONE, username_from_env) \
     X(STR, NONE, localusername) \
     X(INT, NONE, rfc_environ) \
@@ -917,8 +968,10 @@ void cleanup_exit(int);
     X(STR, NONE, default_log_path) \
     X(INT, NONE, is_enable_shortcut) \
     X(INT, NONE, scrolllines) \
+    X(INT, NONE, paste_delay) \
     X(INT, NONE, data_version) \
     X(INT, NONE, group_collapse) \
+    X(INT, NONE, auto_reconnect) \
 	\
     X(STR, NONE, adb_con_str) \
     X(STR, NONE, adb_cmd_str) \
@@ -936,7 +989,7 @@ enum config_primary_key { CONFIG_OPTIONS(CONF_ENUM_DEF) N_CONFIG_OPTIONS };
 
 /* Functions handling configuration structures. */
 Conf *conf_new(void);		       /* create an empty configuration */
-void conf_free(Conf *conf);
+void conf_free(Conf *&conf);
 void conf_clear(Conf *conf);
 Conf *conf_copy(Conf *oldconf);
 void conf_copy_into(Conf *dest, Conf *src);
@@ -1024,7 +1077,20 @@ typedef std::function<int(const char* session)> SessionHandler;
 int for_grouped_session_do(const char* group_session_name, SessionHandler handler, int max_num);
 void do_defaults(const char *, Conf *);
 void registry_cleanup(void);
-
+char* load_global_ssetting(char* setting, const char* def);
+void save_global_ssetting(char* setting, const char* value);
+int load_global_isetting(char* setting, int def);
+void save_global_isetting(char* setting, int value);
+bool is_pre_defined_session(const char* session_name);
+bool cannot_save_session(const char* session_name);
+int get_default_shortcut_keytype(const char* func);
+int get_default_shortcut_keyval(const char* func);
+bool is_pre_defined_cmd(const char* cmd_name);
+bool cannot_save_cmd(const char* cmd_name);
+bool is_cmd_session(const char* cmd_name);
+void load_cmd_settings(const char* cmd_name, SavedCmd& cmd);
+void save_cmd_settings(const char* cmd_name, const SavedCmd& cmd);
+void move_cmd_settings(const char* fromcmd, const char* tocmd);
 /*
  * Functions used by settings.c to provide platform-specific
  * default settings.
@@ -1338,7 +1404,7 @@ void printer_finish_job(printer_job *);
 int cmdline_process_param(const char *, char *, int, Conf *);
 void cmdline_run_saved(Conf *);
 void cmdline_cleanup(void);
-int cmdline_get_passwd_input(prompts_t *p, const unsigned char *in, int inlen);
+int cmdline_get_passwd_input(prompts_t *p, const unsigned char *in, int inlen, Conf *cfg);
 #define TOOLTYPE_FILETRANSFER 1
 #define TOOLTYPE_NONNETWORK 2
 extern int cmdline_tooltype;

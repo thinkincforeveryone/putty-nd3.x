@@ -9,9 +9,10 @@
 #include "Action.h"
 #include "State.h"
 #include "Session.h"
-#include<vector>
-#include<string>
-#include<map>
+#include <vector>
+#include <string>
+#include <map>
+#include <set>
 using namespace std;
 struct IProgressDialog;
 
@@ -21,49 +22,67 @@ public:
 	enum MyState
 	{
 		IDLE_STATE = 1,
+		REFRESH_ACCESS_TOKEN_STATE,
 		GET_AUTH_CODE_STATE,
 		GET_ACCESS_TOKEN_STATE,
 		GET_SESSION_FOLDER,
 		GET_EXIST_SESSIONS_ID,
 		CREATE_SESSION_FOLDER,
-		PREPARE_UPLOAD,
-		PREPARE_DOWNLOAD,
+		CHECK_ACTION,
+		REFRESH_ACCESS_TOKEN_STATE2,
 		GET_REST_SESSIONS_ID,
 		UPLOAD_SESSION,
 		UPLOAD_DONE,
 		DOWNLOAD_SESSION,
 		DOWNLOAD_DONE,
+		DELETE_SESSIONS,
+		DELETE_DONE,
+		RENAME_SESSION,
+		RENAME_DONE,
 	};
 	enum MyEvent
 	{
 		NETWORK_INPUT_EVT = 0,
 		NEXT_EVT,
 		CREATE_SESSION_FOLDER_EVT,
-		PREPARE_UPLOAD_EVT,
-		PREPARE_DOWNLOAD_EVT,
+		UPLOAD_EVT,
+		RENAME_EVT,
+		DOWNLOAD_EVT,
+		DELETE_EVT,
 		GET_REST_SESSIONS_ID_EVT,
 		DONE_EVT,
 		HTTP_SUCCESS_EVT,
 		HTTP_FAILED_EVT,
+		RETRY_EVT,
 	};
 
 	static Fsm::FiniteStateMachine* getZmodemFsm();
+	static bool not_to_upload(const char* session_name);
 
 	GoogleDriveFsmSession();
 	virtual ~GoogleDriveFsmSession();
 
-	void startUpload();
-	void startDownload();
+	void LoadRemoteFile();
+	void ApplyChanges();
+	void ResetChanges();
+	bool IsBusy();
+
+	map<string, string>& get_session_id_map(){ return mExistSessionsId; }
+	void clear_in_all_list(const string& session){
+		mUploadList.erase(session);
+		mDeleteList.erase(session);
+		mDownloadList.erase(session);
+		mRenameList.erase(session);
+	}
+
 private:
 	//fsm
-	void startProgressDlg();
-	void stopProgressDlg();
-	void updateProgressDlg(const string& title, const string& desc, int completed, int total);
 
 	void initAll(); 
 	void getAuthCode();
 	void handleAuthCodeInput();
 	void getAccessToken();
+	void refreshAccessToken();
 	void parseAccessToken();
 	void getSessionFolder();
 	void parseSessionFolderInfo();
@@ -71,14 +90,15 @@ private:
 	void parseCreateSessionFolderInfo();
 	void getExistSessionsId();
 	void parseSessionsId();
-	void prepareUpload();
+	void checkAction();
 	void uploadSession();
 	void parseUploadSession();
-	void uploadDone();
-	void prepareDowload();
+	void renameSession();
+	void parseRenameSession();
 	void downloadSession();
 	void parseDownloadSession();
-	void downloadDone();
+	void deleteSession();
+	void parseDeleteSession();
 
 	//protocol
 	void handleInput(Net::SocketConnectionPtr connection);
@@ -88,6 +108,7 @@ private:
 	void handleHttpRsp();
 	void resetHttpData();
 	static size_t query_auth_write_cb(void *_ptr, size_t _size, size_t _nmemb, void *_data);
+	void update_ui_progress_for_http_request();
 private:
 	static base::Lock fsmLock_;
 	static std::auto_ptr<Fsm::FiniteStateMachine> fsm_;
@@ -101,13 +122,11 @@ private:
 	string mCodeChallenge;
 	string mAuthCodeInput;
 	string mAuthCode;
+	string mRefreshToken;
+	string mAccessToken;
 	string mAccessTokenHeader;
-	bool mIsUpload;
 
-	IProgressDialog * mProgressDlg;
-
-	vector<string> mLocalSessionsList;
-	int mHandlingIndex;
+	//IProgressDialog * mProgressDlg;
 
 	base::Lock mHttpLock;
 	string mHttpUrl;
@@ -120,7 +139,16 @@ private:
 
 	string mSessionFolderId;
 	map<string, string> mExistSessionsId;
-	map<string, string>::iterator mExistSessionsIdIt;
+
+	int mDownloadNum;
+	int mDeleteNum;
+	int mUploadNum;
+	int mRenameNum;
+public:
+	map<string, string> mDownloadList;
+	set<string> mDeleteList;
+	map<string, string> mUploadList;
+	map<string, string> mRenameList;
 };
 
 #define g_google_drive_fsm_session (DesignPattern::Singleton<GoogleDriveFsmSession, 0>::instance())

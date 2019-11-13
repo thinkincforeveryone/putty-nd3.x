@@ -85,8 +85,14 @@ void *TmplStore::open_settings_w(const char *sessionname, char **errmsg)
 	return handler;
 }
 
+
+static bool auto_cmd_written = false;
 void TmplStore::write_setting_s(void *handle, const char *key, const char *value)
 {
+	const char* autocmd_key = "Autocmd";
+	bool is_auto_cmd_key = memcmp(autocmd_key, key, strlen(autocmd_key)) == 0;
+	if (is_auto_cmd_key){ auto_cmd_written = false; };
+
 	if (handle == NULL){ return; }
 	WriteHandler* hd = (WriteHandler*)handle;
 	HKEY hkey = (HKEY)hd->implStoreHandleM;
@@ -110,6 +116,10 @@ void TmplStore::write_setting_s(void *handle, const char *key, const char *value
 			//else write config
 		}
 	}
+
+	if (is_auto_cmd_key){
+		auto_cmd_written = true;
+	};
 	RegSetValueEx(hkey, key, 0, REG_SZ, (BYTE*)value, 1 + strlen(value));
 }
 
@@ -118,7 +128,15 @@ void TmplStore::write_setting_i(void *handle, const char *key, int value)
 	if (handle == NULL){ return; }
 	WriteHandler* hd = (WriteHandler*)handle;
 	HKEY hkey = (HKEY)hd->implStoreHandleM;
-	if (strcmp("GroupCollapse", key) == 0){
+
+	const char* emcrypted_key = "AutocmdEncrypted";
+	const char* hiden_key = "AutocmdHide";
+	bool is_emcrypted_key = memcmp(emcrypted_key, key, strlen(emcrypted_key)) == 0;
+	bool is_hiden_key = memcmp(hiden_key, key, strlen(hiden_key)) == 0;
+
+	if (strcmp("GroupCollapse", key) == 0 ||
+		(auto_cmd_written && (is_emcrypted_key || is_hiden_key))
+		){
 		//exception
 		RegSetValueEx(hkey, key, 0, REG_DWORD, (CONST BYTE *) &value, sizeof(value));
 		return;
@@ -136,10 +154,14 @@ void TmplStore::write_setting_i(void *handle, const char *key, int value)
 		if ((kv = (struct skeyval*)find234(tree, &tmp, NULL)) != NULL) {
 			int val = atoi(kv->value);
 			if (val == value) { return; }
+			//else write config
 		}
-		if (is_default_value(key, value)){ return; }
+		else
+		{
+			if (is_default_value(key, value)){ return; }
+			//else write config
+		}
 	}
-
 	RegSetValueEx(hkey, key, 0, REG_DWORD, (CONST BYTE *) &value, sizeof(value));
 }
 
@@ -249,23 +271,23 @@ FontSpec * TmplStore::read_setting_fontspec(void *handle, const char *name)
 		}
 		else{
 			sfree(suffname);
-			return 0;
+			font_name = dupstr("Courier New");
 		}
 	}
 	settingname = dupcat(name, "IsBold", NULL);
 	isbold = read_setting_i(handle, settingname, -1);
 	sfree(settingname);
-	if (isbold == -1) { sfree(font_name); return 0; }
+	if (isbold == -1) { isbold = 0; }
 
 	settingname = dupcat(name, "CharSet", NULL);
 	charset = read_setting_i(handle, settingname, -1);
 	sfree(settingname);
-	if (charset == -1) { sfree(font_name); return 0; }
+	if (charset == -1) { charset = 0; }
 
 	settingname = dupcat(name, "Height", NULL);
 	height = read_setting_i(handle, settingname, INT_MIN);
 	sfree(settingname);
-	if (height == INT_MIN) { sfree(font_name); return 0; }
+	if (height == INT_MIN) { height = 14; }
 
 	return fontspec_new(font_name, isbold, height, charset);
 }

@@ -1184,8 +1184,12 @@ void exec_autocmd(void* frontend, void *handle, Conf *cfg,
 
 
 int is_autocmd_completed(Conf* cfg){
+	int index = conf_get_int(cfg, CONF_autocmd_index);
+	int autocmd_enable;
+	bool exist = conf_try_get_int_int(cfg, CONF_autocmd_enable, index, autocmd_enable);
+	if (!exist){ return true; }
 	return (conf_get_int( cfg, CONF_autocmd_try) < 0 || conf_get_int( cfg, CONF_autocmd_try) >= AUTOCMD_COUNT*3
-        || conf_get_int( cfg, CONF_autocmd_index) < 0 || conf_get_int( cfg, CONF_autocmd_index) >= AUTOCMD_COUNT);
+		|| index < 0 || index >= AUTOCMD_COUNT);
 }
 
 void autocmd_logevent(void* frontend, const char* expect, int is_hidden,
@@ -1210,6 +1214,9 @@ const char* get_autocmd(void* frontend, Conf *cfg,
     if (cmd_debug){
         debug(("\nrecv[%s]\n", recv_buf));
     }
+
+	extern bool is_autocmd_enabled(void *frontend);
+	if (!is_autocmd_enabled(frontend)){ return NULL; }
 
     /* autocmd is completed or it reach retry times */
     if (is_autocmd_completed(cfg))

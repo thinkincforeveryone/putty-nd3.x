@@ -53,6 +53,7 @@ void term_free_hits(Terminal *term);
 #define TBLINK_DELAY    ((TICKSPERSEC*9+19)/20)/* ticks between text blinks*/
 #define CBLINK_DELAY    (CURSORBLINK) /* ticks between cursor blinks */
 #define VBELL_DELAY     (VBELL_TIMEOUT) /* visual bell timeout in ticks */
+#define MAX_TERM_DATA_COUNT_PER_BLINK 2
 
 #define compatibility(x) \
     if ( ((CL_##x)&term->compatibility_level) == 0 ) { 	\
@@ -1296,8 +1297,6 @@ static void power_on(Terminal *term, int clear)
     term->curs.x = 0;
     term_schedule_tblink(term);
     term_schedule_cblink(term);
-    autocmd_init(term->conf);
-	term->scroll_to_end = TRUE;
 }
 
 /*
@@ -1306,10 +1305,16 @@ static void power_on(Terminal *term, int clear)
 void term_update(Terminal *term)
 {
     Context ctx;
+    ctx = get_ctx(term->frontend);
+	extern bool is_controller_active(Context ctx);
+	bool is_active = is_controller_active(ctx);
+	if (!is_active){
+		free_ctx(term->frontend, ctx);
+		return;
+	}
 
     term->window_update_pending = FALSE;
 
-    ctx = get_ctx(term->frontend);
     if (ctx) {
 	int need_sbar_update = term->seen_disp_event;
 	if (term->seen_disp_event && term->scroll_on_disp && term->scroll_to_end) {
@@ -1362,7 +1367,11 @@ void term_seen_key_event(Terminal *term)
  */
 void term_pwron(Terminal *term, int clear)
 {
-    power_on(term, clear);
+	term->term_data_count = 0;
+	term->next_term_data_time = 0;
+	power_on(term, clear);
+	autocmd_init(term->conf);
+	term->scroll_to_end = TRUE;
     if (term->ldisc)		       /* cause ldisc to notice changes */
 	ldisc_echoedit_update(term->ldisc);
     term->disptop = 0;
@@ -1553,7 +1562,7 @@ void term_clrsb(Terminal *term)
     int i;
 
 	int last_line = find_last_nonempty_line(term, term->screen) + 1;
-	if (term->curs.y == last_line && term->curs.x == 0)
+	if (term->curs.y >= last_line && term->curs.x == 0)
 	{
 		if (term->screen) {
 			swap_screen(term, 1, FALSE, FALSE);
@@ -1680,6 +1689,9 @@ Terminal *term_init(Conf *myconf, struct unicode_data *ucsdata,
     term->wcFromTo_size = 0;
 
     term->window_update_pending = FALSE;
+
+	term->term_data_count = 0;
+	term->next_term_data_time = 0;
 
     term->bidi_cache_size = 0;
     term->pre_bidi_cache = term->post_bidi_cache = NULL;
@@ -6112,6 +6124,12 @@ static void sel_spread(Terminal *term)
     }
 }
 
+static void term_paste_callback(void *vterm);
+void term_timer_paste_callback(void *ctx, unsigned long now)
+{
+	term_paste_callback(ctx);
+}
+
 static void term_paste_callback(void *vterm)
 {
     Terminal *term = (Terminal *)vterm;
@@ -6130,13 +6148,88 @@ static void term_paste_callback(void *vterm)
 	term->paste_pos += n;
 
 	if (term->paste_pos < term->paste_len) {
-            queue_toplevel_callback(term_paste_callback, term);
+		schedule_timer(conf_get_int(term->conf, CONF_paste_delay), term_timer_paste_callback, term); 
 	    return;
 	}
     }
     sfree(term->paste_buffer);
     term->paste_buffer = NULL;
     term->paste_len = 0;
+}
+
+void term_add_paste_buffer(Terminal* term, const wchar_t* data, int len)
+{
+	const wchar_t *p, *q;
+
+	term_seen_key_event(term);     /* pasted data counts */
+
+	int left = 0;
+	if (term->paste_buffer)
+	{
+		wchar_t* old_buffer = term->paste_buffer;
+		left = term->paste_len - term->paste_pos;
+		term->paste_buffer = snewn(len + 12 + left, wchar_t);
+		memcpy(term->paste_buffer, old_buffer + term->paste_pos, left * sizeof(wchar_t));
+		term->paste_pos = 0;
+		term->paste_len = left;
+		sfree(old_buffer);
+	}
+	else {
+		term->paste_buffer = snewn(len + 12, wchar_t);
+		term->paste_pos = term->paste_len = 0;
+	}
+
+	if (term->bracketed_paste) {
+		memcpy(term->paste_buffer + term->paste_len, L"\033[200~", 6 * sizeof(wchar_t));
+		term->paste_len += 6;
+	}
+
+	p = q = data;
+	while (p < data + len) {
+		while (p < data + len &&
+			!(p <= data + len - sel_nl_sz &&
+				!memcmp(p, sel_nl, sizeof(sel_nl))))
+		{
+			p++;
+		}
+
+		{
+			int i;
+			for (i = 0; i < p - q; i++) {
+				term->paste_buffer[term->paste_len++] = q[i];
+			}
+		}
+
+		if (p <= data + len - sel_nl_sz &&
+			!memcmp(p, sel_nl, sizeof(sel_nl))) {
+			term->paste_buffer[term->paste_len++] = '\015';
+			p += sel_nl_sz;
+		}
+		q = p;
+	}
+
+	if (term->bracketed_paste) {
+		memcpy(term->paste_buffer + term->paste_len,
+			L"\033[201~", 6 * sizeof(wchar_t));
+		term->paste_len += 6;
+	}
+
+	/* Assume a small paste will be OK in one go. */
+	if (term->paste_len < 32) {
+		if (term->ldisc) {
+			luni_send(term->ldisc, term->paste_buffer, term->paste_len, 0);
+		}
+		if (term->paste_buffer)
+		{
+			sfree(term->paste_buffer);
+		}
+		term->paste_buffer = 0;
+		term->paste_pos = term->paste_len = 0;
+		return;
+	}
+	if (left == 0) {
+		schedule_timer(0, term_timer_paste_callback, term);
+	}
 }
 
 void term_do_paste(Terminal *term)
@@ -6146,61 +6239,10 @@ void term_do_paste(Terminal *term)
 
     get_clip(term->frontend, &data, &len);
     if (data && len > 0) {
-        wchar_t *p, *q;
-
-	term_seen_key_event(term);     /* pasted data counts */
-
-        if (term->paste_buffer)
-            sfree(term->paste_buffer);
-        term->paste_pos = term->paste_len = 0;
-        term->paste_buffer = snewn(len + 12, wchar_t);
-
-        if (term->bracketed_paste) {
-            memcpy(term->paste_buffer, L"\033[200~", 6 * sizeof(wchar_t));
-            term->paste_len += 6;
-        }
-
-        p = q = data;
-        while (p < data + len) {
-            while (p < data + len &&
-                   !(p <= data + len - sel_nl_sz &&
-                     !memcmp(p, sel_nl, sizeof(sel_nl))))
-                p++;
-
-            {
-                int i;
-                for (i = 0; i < p - q; i++) {
-                    term->paste_buffer[term->paste_len++] = q[i];
-                }
-            }
-
-            if (p <= data + len - sel_nl_sz &&
-                !memcmp(p, sel_nl, sizeof(sel_nl))) {
-                term->paste_buffer[term->paste_len++] = '\015';
-                p += sel_nl_sz;
-            }
-            q = p;
-        }
-
-        if (term->bracketed_paste) {
-            memcpy(term->paste_buffer + term->paste_len,
-                   L"\033[201~", 6 * sizeof(wchar_t));
-            term->paste_len += 6;
-        }
-
-        /* Assume a small paste will be OK in one go. */
-        if (term->paste_len < 256) {
-            if (term->ldisc)
-		luni_send(term->ldisc, term->paste_buffer, term->paste_len, 0);
-            if (term->paste_buffer)
-                sfree(term->paste_buffer);
-            term->paste_buffer = 0;
-            term->paste_pos = term->paste_len = 0;
-        }
+		term_add_paste_buffer(term, data, len);
     }
     get_clip(term->frontend, NULL, NULL);
 
-    queue_toplevel_callback(term_paste_callback, term);
 }
 
 void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
@@ -6367,7 +6409,8 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
 	sel_spread(term);
     } else if ((bcooked == MBT_SELECT && a == MA_DRAG) ||
 	       (bcooked == MBT_EXTEND && a != MA_RELEASE)) {
-        if (term->selstate == NO_SELECTION || term->selstate == SELECTED) {
+        if (a == MA_DRAG &&
+			(term->selstate == NO_SELECTION || term->selstate == SELECTED)) {
             /*
              * This can happen if a front end has passed us a MA_DRAG
              * without a prior MA_CLICK. OS X GTK does so, for
@@ -6548,12 +6591,46 @@ int term_ldisc(Terminal *term, int option)
     return FALSE;
 }
 
+void frozen_frontend(void* frentend, bool is_frozen);
+void term_data_timer(void *ctx, unsigned long now);
+static void term_schedule_term_data(Terminal *term)
+{
+	term->next_term_data_time = schedule_timer(100, term_data_timer, term);
+}
+
+void term_data_timer(void *ctx, unsigned long now)
+{
+	Terminal *term = (Terminal *)ctx;
+
+	frozen_frontend(term->frontend, false);
+	if (term->term_data_count > MAX_TERM_DATA_COUNT_PER_BLINK)
+	{
+		term_data(term, 0, NULL, 0);
+	}
+	term->term_data_count = 0;
+	term_schedule_term_data(term);
+}
+
 #include "ldisc.h"
 #include <string>
 int is_autocmd_completed(Conf* cfg);
 int term_data(Terminal *term, int is_stderr, const char *data, int len)
 {
-    bufchain_add(&term->inbuf, data, len);
+	if (data != NULL)
+	{
+		bufchain_add(&term->inbuf, data, len);
+		term->term_data_count++;
+	}
+
+	if (term->next_term_data_time == 0){
+		term_schedule_term_data(term);
+	}
+
+	bool autocmd_completed = is_autocmd_completed(term->conf) != 0;
+	if (data != NULL && autocmd_completed && (term->term_data_count > MAX_TERM_DATA_COUNT_PER_BLINK)){
+		frozen_frontend(term->frontend, true);
+		return 0;
+	}
 
     if (!term->in_term_out) {
 	term->in_term_out = TRUE;
@@ -6638,7 +6715,7 @@ void term_fresh_lastline(Terminal *term, int headerlen, const char *data, int le
 	data_to_show.reserve(128);
 	//delete or new a line
 	int match_pos = 0;
-	if (headerlen <=0 || (match_pos = strLastLine.find(std::string(data, headerlen))) == std::string::npos){
+	if (headerlen <=0 || (match_pos = strLastLine.rfind(std::string(data, headerlen))) == std::string::npos){
 		data_to_show.append("\r\n");
 		data_to_show.append(data, len);
 	}else{

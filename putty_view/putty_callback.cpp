@@ -14,10 +14,13 @@
 #include "base/timer.h"
 #include "WinWorker.h"
 #include "WinProcessor.h"
+#include "CmdLineHandler.h"
+#include "putty_global_config.h"
 
 static wchar_t *clipboard_contents;
 static size_t clipboard_length;
 Conf* cfg = NULL;
+SavedCmd g_saved_cmd;
 void init_flashwindow();
 void pageant_init();
 //void fini_local_agent();
@@ -26,6 +29,7 @@ base::RepeatingTimer<Processor::WinWorker>  gUITimer;
 void process_init()
 {
 	USES_CONVERSION;
+	flags = FLAG_INTERACTIVE;
 
 	WindowInterface::GetInstance()->init_ui_msg_loop();
 	cfg = conf_new();
@@ -81,24 +85,25 @@ void process_init()
 
 	//popup_menus[SYSMENU].menu = GetSystemMenu(hwnd, FALSE);
 	NativePuttyController::popup_menu = CreatePopupMenu();
+	HMENU m = NativePuttyController::popup_menu;
 	AppendMenu(NativePuttyController::popup_menu, MF_ENABLED, IDM_PASTE, TEXT("&Paste"));
+	AppendMenu(m, MF_ENABLED, IDM_COPYALL, TEXT("C&opy All to Clipboard"));
 	//for (int j = 0; j < lenof(popup_menus); j++) {
-	    HMENU m = NativePuttyController::popup_menu;
 
-        AppendMenu(m, MF_SEPARATOR, 0, 0);
-        AppendMenu(m, MF_ENABLED | MF_UNCHECKED, IDM_START_STOP_LOG, TEXT("&Start Logging"));
-	    AppendMenu(m, MF_SEPARATOR, 0, 0);
-	    AppendMenu(m, MF_ENABLED, IDM_SHOWLOG, TEXT("&Event Log"));
 	    AppendMenu(m, MF_SEPARATOR, 0, 0);
 	    AppendMenu(m, MF_ENABLED, IDM_NEWSESS, TEXT("Ne&w Session..."));
 	    AppendMenu(m, MF_ENABLED, IDM_DUPSESS, TEXT("&Duplicate Session"));
 	    AppendMenu(m, MF_ENABLED, IDM_RESTART, TEXT("Restart Sessions"));
+	    AppendMenu(m, MF_ENABLED, IDM_RENAME, TEXT("Rename Tab Title..."));
 	    AppendMenu(m, MF_ENABLED, IDM_RECONF, TEXT("Chan&ge Settings..."));
+        AppendMenu(m, MF_SEPARATOR, 0, 0);
+        AppendMenu(m, MF_ENABLED | MF_UNCHECKED, IDM_START_STOP_LOG, TEXT("&Start Logging"));
+	    AppendMenu(m, MF_ENABLED, IDM_SHOWLOG, TEXT("&Event Log..."));
 	    AppendMenu(m, MF_SEPARATOR, 0, 0);
-	    AppendMenu(m, MF_ENABLED, IDM_COPYALL, TEXT("C&opy All to Clipboard"));
 	    AppendMenu(m, MF_ENABLED, IDM_CLRSB, TEXT("C&lear Scrollback"));
 	    AppendMenu(m, MF_ENABLED, IDM_RESET, TEXT("Rese&t Terminal"));
-	    //AppendMenu(m, MF_SEPARATOR, 0, 0);
+	    AppendMenu(m, MF_SEPARATOR, 0, 0);
+	    AppendMenu(m, MF_ENABLED, IDM_SHOW_CMD_DLG, TEXT("Show Command Dialog..."));
 	    //AppendMenu(m, (cfg.resize_action == RESIZE_DISABLED) ?
 		//       MF_GRAYED : MF_ENABLED, IDM_FULLSCREEN, "&Full Screen");
 	    //AppendMenu(m, MF_SEPARATOR, 0, 0);
@@ -109,7 +114,11 @@ void process_init()
 	    //sfree(str);
 	//}
     
-		gUITimer.Start(base::TimeDelta::FromMilliseconds(100), g_ui_processor, &Processor::WinWorker::process_ui_jobs);
+	gUITimer.Start(base::TimeDelta::FromMilliseconds(100), g_ui_processor, &Processor::WinWorker::process_ui_jobs);
+	int is_show_toolbar = load_global_isetting(IF_SHOW_TOOLBAR_SETTING, 1);
+	ToolbarView::is_show_ = (is_show_toolbar != 0);
+	WindowInterface::GetInstance()->AllToolbarSizeChanged(true);
+	PuttyGlobalConfig::GetInstance()->initShortcutRules();
 }
 
 void process_fini()
@@ -703,8 +712,8 @@ void write_clip(void *frontend, wchar_t * data, int *attr, int len, int must_des
 	EmptyClipboard();
 	SetClipboardData(CF_UNICODETEXT, clipdata);
 	SetClipboardData(CF_TEXT, clipdata2);
-	//if (clipdata3)
-	//    SetClipboardData(RegisterClipboardFormat(CF_RTF), clipdata3);
+	if (clipdata3)
+		SetClipboardData(RegisterClipboardFormat(L"Rich Text Format"), clipdata3);
 	CloseClipboard();
     } else {
 	GlobalFree(clipdata);
@@ -1431,16 +1440,32 @@ void set_busy_status(void *frontend, int status)
     puttyController->update_mouse_pointer();
 }
 
+bool is_autocmd_enabled(void *frontend)
+{
+	assert(frontend != NULL);
+	NativePuttyController *puttyController = (NativePuttyController *)frontend;
+	return puttyController->isAutoCmdEnabled_;
+}
+
+void set_autocmd_enabled(void *frontend, bool enabled)
+{
+	assert(frontend != NULL);
+	NativePuttyController *puttyController = (NativePuttyController *)frontend;
+	puttyController->isAutoCmdEnabled_ = enabled;
+}
+
 int get_userpass_input(void *frontend, prompts_t *p, const unsigned char * in, int inlen)
 {
     assert (frontend != NULL);
     NativePuttyController *puttyController = (NativePuttyController *)frontend;
     int ret;
     ret = autocmd_get_passwd_input(frontend, p, puttyController->term->conf);
+	set_autocmd_enabled(frontend, FALSE);
     if (ret == -1)
-        ret = cmdline_get_passwd_input(p, in, inlen);
+		ret = cmdline_get_passwd_input(p, in, inlen, puttyController->term->conf);
     if (ret == -1)
-    	ret = term_get_userpass_input(puttyController->term, p, in, inlen);
+		ret = term_get_userpass_input(puttyController->term, p, in, inlen);
+	set_autocmd_enabled(frontend, TRUE);
     return ret;
 }
 
@@ -1519,7 +1544,6 @@ void cmdline_error(const char *fmt, ...)
     sprintf(morestuff, "%.70s Command Line Error", appname);
 	MessageBox(WindowInterface::GetInstance()->getNativeTopWnd(), A2W(stuff), A2W(morestuff), MB_ICONERROR | MB_OK | MB_TOPMOST);
     sfree(stuff);
-    exit(1);
 }
 
 #include "win_res.h"
@@ -1683,6 +1707,16 @@ int need_cmd_scatter()
 void cmd_scatter(const char *buf, int len, int interactive)
 {
 	WindowInterface::GetInstance()->cmdScat(NativePuttyController::LDISC_SEND, buf, len, interactive);
+}
+
+void send_cmd(int state, const char *buf, int len, int interactive)
+{
+	WindowInterface::GetInstance()->sendCmd(state, NativePuttyController::LDISC_SEND, buf, len, interactive);
+}
+
+void send_script(int state, const char *buf, int len, int interactive)
+{
+	WindowInterface::GetInstance()->sendScript(state, NativePuttyController::LDISC_SEND, buf, len, interactive);
 }
 
 int read_lnk(const char* lnk_name, char* link_path, unsigned link_path_len);
@@ -1998,7 +2032,10 @@ void open_wait_sessions(void* arg)
 	conf_free(backup_cfg);
 	schedule_open_wait_sessions(10000);
 }
-
+void open_wait_session_in_new_window()
+{
+	WindowInterface::GetInstance()->open_wait_session_in_new_window();
+}
 void schedule_open_wait_sessions(int microseconds)
 {
 	struct timeval timeout;
@@ -2060,4 +2097,78 @@ uint64_t get_ms()
 	time = ((uint64_t)file_time.dwLowDateTime);
 	time += ((uint64_t)file_time.dwHighDateTime) << 32;
 	return time / 10 / 1000;
+}
+
+bool is_controller_active(Context ctx)
+{
+	assert(ctx != NULL);
+	NativePuttyController *puttyController = (NativePuttyController *)ctx;
+	return puttyController->isActive();
+}
+
+void frozen_frontend(void* frentend, bool is_frozen)
+{
+	assert(frentend != NULL);
+	NativePuttyController *puttyController = (NativePuttyController *)frentend;
+	puttyController->setFrozen(is_frozen);
+}
+
+void create_browser()
+{
+	WindowInterface::GetInstance()->createBrowser();
+}
+
+int get_tab_count_in_last_active_browser()
+{
+	return WindowInterface::GetInstance()->getTabCountInLastActiveBrowser();
+}
+
+void show_session_popup_menu()
+{
+	POINT cursorpos;
+	GetCursorPos(&cursorpos);
+	TrackPopupMenu(NativePuttyController::popup_menu,
+		TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON,
+		cursorpos.x, cursorpos.y,
+		0, WindowInterface::GetInstance()->getNativeTopWnd(), NULL);
+}
+
+bool not_to_upload(const char* session_name)
+{
+	return cannot_save_session(session_name);
+}
+
+int get_default_shortcut_keytype(const char* func)
+{
+	return !strcmp(func, SHORTCUT_KEY_SELECT_TAB) ? ALT
+		: !strcmp(func, SHORTCUT_KEY_SELECT_NEXT_TAB) ? CTRL
+		: !strcmp(func, SHORTCUT_KEY_SELECT_PRE_TAB) ? CTRL
+		: !strcmp(func, SHORTCUT_KEY_DUP_TAB) ? CTRL_SHIFT
+		: !strcmp(func, SHORTCUT_KEY_NEW_TAB) ? CTRL_SHIFT
+		: !strcmp(func, SHORTCUT_KEY_RELOAD_TAB) ? CTRL_SHIFT
+		: !strcmp(func, SHORTCUT_KEY_EDIT_TAB_TITLE) ? CTRL_SHIFT
+		: !strcmp(func, SHORTCUT_KEY_RENAME_SESSION) ? F2
+		: !strcmp(func, SHORTCUT_KEY_HIDE_SHOW_TOOLBAR) ? CTRL_SHIFT
+		: !strcmp(func, SHORTCUT_KEY_CLOSE_TAB) ? CTRL_SHIFT
+		: 0;
+}
+
+int get_default_shortcut_keyval(const char* func)
+{
+	return !strcmp(func, SHORTCUT_KEY_SELECT_TAB) ? 0
+		: !strcmp(func, SHORTCUT_KEY_SELECT_NEXT_TAB) ? VK_OEM_3
+		: !strcmp(func, SHORTCUT_KEY_SELECT_PRE_TAB) ? VK_TAB
+		: !strcmp(func, SHORTCUT_KEY_DUP_TAB) ? 'T'
+		: !strcmp(func, SHORTCUT_KEY_NEW_TAB) ? 'C'
+		: !strcmp(func, SHORTCUT_KEY_RELOAD_TAB) ? 'R'
+		: !strcmp(func, SHORTCUT_KEY_EDIT_TAB_TITLE) ? 'E'
+		: !strcmp(func, SHORTCUT_KEY_RENAME_SESSION) ? VK_TAB
+		: !strcmp(func, SHORTCUT_KEY_HIDE_SHOW_TOOLBAR) ? '6'
+		: !strcmp(func, SHORTCUT_KEY_CLOSE_TAB) ? 'K'
+		: 0;
+}
+
+void reinit_shortcut_rules()
+{
+	PuttyGlobalConfig::GetInstance()->initShortcutRules();
 }

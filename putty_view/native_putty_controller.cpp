@@ -60,6 +60,7 @@ NativePuttyController::NativePuttyController(Conf *theCfg, view::View* theView)
     extra_height = 28;
     font_width = 10;
     font_height = 20;
+	font_height_by_wheel = 0;
     offset_width = offset_height = conf_get_int(cfg, CONF_window_border);
     lastact = MA_NOTHING;
     lastbtn = MBT_NOTHING;
@@ -85,9 +86,6 @@ NativePuttyController::NativePuttyController(Conf *theCfg, view::View* theView)
     strncpy(disRawName, disrawname, 256);
 	disName = A2W(disrawname);
     close_mutex= CreateMutex(NULL, FALSE, NULL);
-	pending_netevent = 0;
-	pend_netevent_wParam = 0;
-	pend_netevent_lParam = 0;
 	backend_state = LOADING;
 	isClickingOnPage = false;
 	conf_set_int(cfg, CONF_is_enable_shortcut, true);
@@ -96,7 +94,7 @@ NativePuttyController::NativePuttyController(Conf *theCfg, view::View* theView)
 	cursor_visible = 1;
 	forced_visible = FALSE;
 	nativeParentWin_ = NULL;
-
+	isAutoCmdEnabled_ = TRUE;
 }
 
 NativePuttyController::~NativePuttyController()
@@ -107,7 +105,7 @@ NativePuttyController::~NativePuttyController()
 	fini();
 	zSession_ = NULL;
 	conf_free(cfg);
-
+	expire_timer_context(this);
 }
 
 void NativePuttyController::destroy()
@@ -122,7 +120,7 @@ int NativePuttyController::init(HWND hwndParent)
 {
 	USES_CONVERSION;
 	
-    
+	is_frozen = false;
 	page_ = new NativePuttyPage();
 	page_->init(this, cfg, hwndParent);
 
@@ -134,7 +132,7 @@ int NativePuttyController::init(HWND hwndParent)
     term_provide_logctx(term, logctx);
     term_size(term, conf_get_int(cfg, CONF_height), 
         conf_get_int(cfg, CONF_width), conf_get_int(cfg, CONF_savelines));   
-    init_fonts(0, 0);
+    init_fonts(0, font_height_by_wheel);
 
     CreateCaret();
     page_->init_scrollbar(term);
@@ -142,7 +140,13 @@ int NativePuttyController::init(HWND hwndParent)
 	
 	Filename* keyfile = conf_get_filename(cfg, CONF_keyfile);
 	if (conf_get_int(cfg, CONF_tryagent) && !filename_is_null(keyfile)){
-		add_keyfile(keyfile);
+		if (agent_exists()){
+			add_keyfile(keyfile);
+		}
+		else{
+			const char* tips = "The pageant is not running.\r\nSo the password of the key, if any, is required for each connection.\r\n";
+			from_backend(this, 0, tips, strlen(tips));
+		}
 	}
 
     if (start_backend() != 0){
@@ -168,6 +172,13 @@ int NativePuttyController::init(HWND hwndParent)
 
 void NativePuttyController::checkTimerCallback()
 {
+	int enabled_auto_reconnect = conf_get_int(cfg, CONF_auto_reconnect);
+	if (enabled_auto_reconnect && (must_close_session || must_close_session))
+	{
+		close_session();
+		restartBackend();
+		return;
+	}
 	if (must_close_tab_)
 	{
 		closeTab();
@@ -936,85 +947,85 @@ int NativePuttyController::on_paint()
 
 int NativePuttyController::swallow_shortcut_key(UINT message, WPARAM wParam, LPARAM lParam)
 {
-    if (message != WM_KEYDOWN && message != WM_SYSKEYDOWN)
-        return 0;
+	if (message != WM_KEYDOWN && message != WM_SYSKEYDOWN)
+		return 0;
 
 	if (!PuttyGlobalConfig::GetInstance()->isShotcutKeyEnabled())
-        return 0;
-     
-    BYTE keystate[256];
-    if (GetKeyboardState(keystate) == 0)
-        return 0;
+		return 0;
 
-    int ctrl_pressed = (keystate[VK_CONTROL] & 0x80);
-    int shift_pressed = (keystate[VK_SHIFT] & 0x80);
-    int alt_pressed = (keystate[VK_MENU] & 0x80);
-    int next_tab = -1;
+	BYTE keystate[256];
+	if (GetKeyboardState(keystate) == 0)
+		return 0;
 
-	if (wParam == VK_F2){
-		rename();
-		return 1;
-	}
+	int ctrl_pressed = (keystate[VK_CONTROL] & 0x80);
+	int shift_pressed = (keystate[VK_SHIFT] & 0x80);
+	int alt_pressed = (keystate[VK_MENU] & 0x80);
 
-    if (alt_pressed && !ctrl_pressed && !shift_pressed){
-        if (wParam == '0'){
-			WindowInterface::GetInstance()->selectTab(9);
-			return 1;
-        }else if (wParam >= '1' && wParam <= '9'){
-            WindowInterface::GetInstance()->selectTab(wParam - '1');
-			return 1;
-        }else if (wParam == VK_OEM_3 /*|| wParam == VK_RIGHT*/){
-            // '`'
-			WindowInterface::GetInstance()->selectNextTab();
-			return 1;
-        //}else if ( wParam == VK_LEFT){/*wParam == VK_TAB: Alt + Tab is not configable*/
-		//	WindowInterface::GetInstance()->selectPreviousTab();
-		//return 1;
-        }
-    }
-
-	if (!alt_pressed && ctrl_pressed && !shift_pressed){
-		if (wParam == VK_TAB){
-			WindowInterface::GetInstance()->selectPreviousTab();
-            return 1;
-		}
-		else if (wParam == VK_OEM_3){
-			WindowInterface::GetInstance()->selectNextTab();
-            return 1;
-		}
-	}
-    if (!alt_pressed && ctrl_pressed && shift_pressed){
-        if (wParam == 'T'){
-			WindowInterface::GetInstance()->dupCurSession();
-            return 1;
-        }
-		if (wParam == 'N'){
-			WindowInterface::GetInstance()->createNewSession();
-            return 1;
-        }
-		if (wParam == 'C'){
-			WindowInterface::GetInstance()->createNewSession();
-            return 1;
-        }
-		if (wParam == 'R'){
-			WindowInterface::GetInstance()->reloadCurrentSession();
-            return 1;
-        }
-		if (wParam == 'E'){
-			rename();
-			return 1;
-		}
-
-    }
 	if (zSession_->isDoingRz()){
 		//const std::string err("It has been considered to terminate the session with Ctrl+C. But it is troublesome");
 		if (!alt_pressed && ctrl_pressed && !shift_pressed && wParam == 'C'){
 			zSession_->reset();
 			const std::string promp("\r\nuser cancelled, if you are doing rz, please wait until the reset package is sent in buffer.\r\n");
-			term_data(term, 0, promp.c_str(), promp.length()); 
+			term_data(term, 0, promp.c_str(), promp.length());
 		}
 		return 1;
 	}
+
+	int key_type = (wParam >= VK_F1 && wParam <= VK_F12) ? (wParam - VK_F1 + F1)
+		: ctrl_pressed && shift_pressed && !alt_pressed ? CTRL_SHIFT
+		: ctrl_pressed && !shift_pressed && !alt_pressed ? CTRL
+		: !ctrl_pressed && !shift_pressed && alt_pressed ? ALT
+		: -1;
+	if (key_type == -1){ return 0; }
+	const char* rule = PuttyGlobalConfig::GetInstance()->getShortcutRules(key_type, wParam);
+	if (rule == NULL){ return 0; }
+	if (!strcmp(rule, SHORTCUT_KEY_SELECT_TAB)) {
+		if (wParam == '0'){
+			WindowInterface::GetInstance()->selectTab(9);
+			return 1;
+		}
+		else if (wParam >= '1' && wParam <= '9'){
+			WindowInterface::GetInstance()->selectTab(wParam - '1');
+			return 1;
+		}
+	}
+	else if (!strcmp(rule, SHORTCUT_KEY_SELECT_NEXT_TAB)) {
+		WindowInterface::GetInstance()->selectNextTab();
+		return 1;
+	}
+	else if (!strcmp(rule, SHORTCUT_KEY_SELECT_PRE_TAB)) {
+		WindowInterface::GetInstance()->selectPreviousTab();
+		return 1;
+	}
+	else if (!strcmp(rule, SHORTCUT_KEY_DUP_TAB)){
+		WindowInterface::GetInstance()->dupCurSession();
+		return 1;
+	}
+	else if (!strcmp(rule, SHORTCUT_KEY_NEW_TAB)){
+		WindowInterface::GetInstance()->createNewSession();
+		return 1;
+	}
+	else if (!strcmp(rule, SHORTCUT_KEY_RELOAD_TAB)){
+		WindowInterface::GetInstance()->reloadCurrentSession();
+		return 1;
+	}
+	else if (!strcmp(rule, SHORTCUT_KEY_EDIT_TAB_TITLE)){
+		rename();
+		return 1;
+	}
+	else if (!strcmp(rule, SHORTCUT_KEY_RENAME_SESSION)){
+		rename();
+		return 1;
+	}
+	else if (!strcmp(rule, SHORTCUT_KEY_HIDE_SHOW_TOOLBAR)){
+		hide_toolbar();
+		return 1;
+	}
+	else if (!strcmp(rule, SHORTCUT_KEY_CLOSE_TAB)){
+		closeTab();
+		return 1;
+	}
+
     return 0;
 
 }
@@ -1079,16 +1090,6 @@ int NativePuttyController::on_reconfig()
 	if (this->back)
 	    this->back->reconfig(this->backhandle, this->cfg);
 
-	/* Screen size changed ? */
-	Conf* cfg = this->cfg;
-	if (conf_get_int(cfg, CONF_height) != conf_get_int(prev_cfg, CONF_height) ||
-	    conf_get_int(cfg, CONF_width) != conf_get_int(prev_cfg, CONF_width) ||
-	    conf_get_int(cfg, CONF_savelines) != conf_get_int(prev_cfg, CONF_savelines) ||
-	    conf_get_int(cfg, CONF_resize_action) == RESIZE_FONT ||
-	    (conf_get_int(cfg, CONF_resize_action) == RESIZE_EITHER && IsZoomed(WindowInterface::GetInstance()->getNativeTopWnd())) ||
-	    conf_get_int(cfg, CONF_resize_action) == RESIZE_DISABLED)
-	    term_size(this->term, conf_get_int(cfg, CONF_height), conf_get_int(cfg, CONF_width), conf_get_int(cfg, CONF_savelines));
-
 	/* Enable or disable the scroll bar, etc */
 	{
 	    LONG nflg, flag = GetWindowLongPtr(getNativePage(), GWL_STYLE);
@@ -1149,17 +1150,19 @@ int NativePuttyController::on_reconfig()
 	FontSpec* new_font = conf_get_fontspec(cfg, CONF_font);
 	FontSpec* old_font = conf_get_fontspec(prev_cfg, CONF_font);
 	if (strcmp(new_font->name, old_font->name) != 0 ||
-	    strcmp(conf_get_str(cfg, CONF_line_codepage), conf_get_str(prev_cfg, CONF_line_codepage)) != 0 ||
-	    new_font->isbold !=  old_font->isbold ||
-	    new_font->height !=  old_font->height ||
-	    new_font->charset != old_font->charset ||
-	    conf_get_int(cfg, CONF_font_quality) != conf_get_int(prev_cfg, CONF_font_quality) ||
-	    conf_get_int(cfg, CONF_vtmode) != conf_get_int(prev_cfg, CONF_vtmode) ||
-	    conf_get_int(cfg, CONF_bold_style) != conf_get_int(prev_cfg, CONF_bold_style) ||
-	    conf_get_int(cfg, CONF_resize_action) == RESIZE_DISABLED ||
-	    conf_get_int(cfg, CONF_resize_action) == RESIZE_EITHER ||
-	    (conf_get_int(cfg, CONF_resize_action) != conf_get_int(prev_cfg, CONF_resize_action)))
-	    init_lvl = 2;
+		strcmp(conf_get_str(cfg, CONF_line_codepage), conf_get_str(prev_cfg, CONF_line_codepage)) != 0 ||
+		new_font->isbold != old_font->isbold ||
+		new_font->height != old_font->height ||
+		new_font->charset != old_font->charset ||
+		conf_get_int(cfg, CONF_font_quality) != conf_get_int(prev_cfg, CONF_font_quality) ||
+		conf_get_int(cfg, CONF_vtmode) != conf_get_int(prev_cfg, CONF_vtmode) ||
+		conf_get_int(cfg, CONF_bold_style) != conf_get_int(prev_cfg, CONF_bold_style) ||
+		conf_get_int(cfg, CONF_resize_action) == RESIZE_DISABLED ||
+		conf_get_int(cfg, CONF_resize_action) == RESIZE_EITHER ||
+		(conf_get_int(cfg, CONF_resize_action) != conf_get_int(prev_cfg, CONF_resize_action))) {
+		font_height_by_wheel = 0;
+		init_lvl = 2;
+	}
 
 	conf_free(prev_cfg);
 	InvalidateRect(getNativePage(), NULL, TRUE);
@@ -1190,6 +1193,21 @@ int NativePuttyController::on_menu( HWND hwnd, UINT message,
     		    log_stop(logctx, cfg);
             }
         }
+		break;
+		case IDM_SHOW_CMD_DLG:
+		{
+			extern int show_cmd_dlg(void);
+			if (!hCmdWnd)
+			{
+				CheckMenuItem(popup_menu, IDM_SHOW_CMD_DLG, MF_CHECKED);
+				show_cmd_dlg();
+			}
+			else
+			{
+				CheckMenuItem(popup_menu, IDM_SHOW_CMD_DLG, MF_UNCHECKED);
+				show_cmd_dlg();
+			}
+		}
             break;
         case IDM_NEWSESS:
 			WindowInterface::GetInstance()->createNewSession();
@@ -1204,6 +1222,10 @@ int NativePuttyController::on_menu( HWND hwnd, UINT message,
 			restartBackend();
             break;
         }
+        case IDM_RENAME:{
+			rename(NULL);
+            break;
+        }
         case IDM_COPYALL:
             term_copyall(term);
             break;
@@ -1215,6 +1237,7 @@ int NativePuttyController::on_menu( HWND hwnd, UINT message,
             break;
         case IDM_RESET:
             term_pwron(term, TRUE);
+			isAutoCmdEnabled_ = TRUE;
             if (ldisc)
             ldisc_send(ldisc, NULL, 0, 0);
             break;
@@ -1978,7 +2001,7 @@ void NativePuttyController::reset_window(int reinit)
     /* Are we being forced to reload the fonts ? */
     if (reinit == RESET_FONT) {
     	deinit_fonts();
-    	init_fonts(0, 0);
+    	init_fonts(0, font_height_by_wheel);
     }
 
     /* Oh, looks like we're minimised */
@@ -2033,10 +2056,13 @@ void NativePuttyController::enact_pending_netevent()
     if (reentering)
 	return;			       /* don't unpend the pending */
 
-    pending_netevent = FALSE;
-
     reentering = 1;
-    select_result(pend_netevent_wParam, pend_netevent_lParam);
+	for (int i = 0; i < pending_param_list.size(); i++)
+	{
+		ParamPair param_pair = pending_param_list[i];
+		select_result(param_pair.wParam, param_pair.lParam);
+	}
+	pending_param_list.clear();
     reentering = 0;
 }
 
@@ -2051,9 +2077,13 @@ int NativePuttyController::on_net_event(HWND hwnd, UINT message,
 	//if (pending_netevent)
 	//    enact_pending_netevent();
 	base::AutoLock guard(socketTreeLock_);
-	//pending_netevent = TRUE;
-	pend_netevent_wParam = wParam;
-	pend_netevent_lParam = lParam;
+	ParamPair pair;
+	pair.wParam = wParam;
+	pair.lParam = lParam;
+	pending_param_list.push_back(pair);
+	if (is_frozen){ 
+		return 0; 
+	}
 	//if (WSAGETSELECTEVENT(lParam) != FD_READ)
 	    enact_pending_netevent();
 
@@ -3383,6 +3413,19 @@ int NativePuttyController::is_alt_pressed(void)
     return FALSE;
 }
 
+int is_shift_pressed(void)
+{
+	BYTE keystate[256];
+	int r = GetKeyboardState(keystate);
+	if (!r)
+		return FALSE;
+	if (keystate[VK_SHIFT] & 0x80)
+		return TRUE;
+	//if (keystate[VK_SHIFT] & 0x80)
+	//	return TRUE;
+	return FALSE;
+}
+
 /*
  * Translate a raw mouse button designation (LEFT, MIDDLE, RIGHT)
  * into a cooked one (SELECT, EXTEND, PASTE).
@@ -3390,7 +3433,7 @@ int NativePuttyController::is_alt_pressed(void)
 Mouse_Button NativePuttyController::translate_button(Mouse_Button button)
 {
     if (button == MBT_LEFT)
-	return MBT_SELECT;
+		return is_shift_pressed() ? MBT_EXTEND : MBT_SELECT;
     if (button == MBT_MIDDLE)
 	return conf_get_int(cfg, CONF_mouse_is_xterm) == 1 ? MBT_PASTE : MBT_EXTEND;
     if (button == MBT_RIGHT)
@@ -3430,6 +3473,19 @@ int NativePuttyController::onMouseWheel(HWND hwnd, UINT message,
 		    wheel_accumulator += WHEEL_DELTA;
 		} else
 		    break;
+
+		if (control_pressed && !shift_pressed) {
+			if (font_height_by_wheel == 0) { font_height_by_wheel = font_height; }
+			font_height_by_wheel = b == MBT_WHEEL_UP ? font_height_by_wheel + 1 : font_height_by_wheel - 1;
+			if (font_height_by_wheel < 6) { font_height_by_wheel = 6; }
+			if (font_height_by_wheel > 60) { font_height_by_wheel = 60; }
+			char tips[64] = { 0 };
+			snprintf(tips, sizeof(tips), "font height:%d", font_height_by_wheel);
+			EnableSizeTip(TRUE);
+			UpdateSizeStr(page_->getWinHandler(), tips);
+			reset_window(RESET_FONT);
+			return 1;
+		}
 
 		if (send_raw_mouse &&
 		    !(conf_get_int(cfg, CONF_mouse_override) && shift_pressed)) {
@@ -3509,6 +3565,7 @@ void NativePuttyController::restartBackend()
 		term_data(term, 1, str, strlen(str));
 	}
 	term_pwron(term, FALSE);
+	isAutoCmdEnabled_ = TRUE;
 	backend_state = LOADING;
 	if (start_backend() != 0){
         //MessageBox(WindowInterface::GetInstance()->getNativeTopWnd(), L"failed to start backend!", TEXT("Error"), MB_OK); 
@@ -3593,8 +3650,6 @@ int NativePuttyController::on_ime_composition(HWND hwnd, UINT message,
     return 0;
 }
 
-
-
 int NativePuttyController::on_palette_changed(HWND hwnd, UINT message,
 				WPARAM wParam, LPARAM lParam)
 {
@@ -3646,6 +3701,14 @@ void NativePuttyController::cmdScat(int type, const char * buffer, int buflen, i
 		lpage_send(ldisc, type, (char*)buffer, buflen, interactive);
 }
 
+extern void term_add_paste_buffer(Terminal* term, const wchar_t* data, int len);
+void NativePuttyController::sendScript(int type, const char * buffer, int buflen, int interactive)
+{
+	USES_CONVERSION;
+	string16 buf16 = A2W(buffer);
+	term_add_paste_buffer(term, buf16.c_str(), buf16.length());
+}
+
 int NativePuttyController::send_buffer_size()
 {
 	if (!isDisconnected()) 
@@ -3668,7 +3731,6 @@ void NativePuttyController::closeTab()
 		contents->delegate()->CloseContents(contents);
 	}
 }
-
 
 void NativePuttyController::rename(const char* input_name)
 {
@@ -3721,3 +3783,31 @@ void NativePuttyController::rename(const char* input_name)
 	//browserView->UpdateTitleBar();
 }
 
+void NativePuttyController::hide_toolbar()
+{
+	ToolbarView::is_show_ = !ToolbarView::is_show_;
+	save_global_isetting(IF_SHOW_TOOLBAR_SETTING, ToolbarView::is_show_);
+	WindowInterface::GetInstance()->AllToolbarSizeChanged(true);
+}
+
+
+bool NativePuttyController::isActive()
+{
+	return IsWindowVisible(page_->getWinHandler());
+}
+
+
+void NativePuttyController::notifyMsg(const char* msg, void* data)
+{
+	if (strcmp("show_right_click_menu", msg) == 0){
+		POINT cursorpos;
+		GetCursorPos(&cursorpos);
+		TrackPopupMenu(NativePuttyController::popup_menu,
+			TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON,
+			cursorpos.x, cursorpos.y,
+			0, getNativePage(), NULL);
+	}else if (strcmp("show_cmd_dlg", msg) == 0){
+		extern int show_cmd_dlg(void);
+		show_cmd_dlg();
+	}
+}

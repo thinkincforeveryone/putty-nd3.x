@@ -53,7 +53,7 @@
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>.;../examples/chrome;../library/ui_gfx;../library;../library/third_party/skia/include/core;../library/third_party/skia/include/config;../library/third_party/skia/include/effects;../library/third_party/skia/include/ports;../library/third_party/skia/include/utils;../library/third_party/skia/src/core;../putty/charset;../putty/windows;../putty/;../fsm;../zmodem;../libcurl/include;..\libevent\WIN32-Code\nmake;../libevent/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;WINVER=0x0600;_WIN32_WINNT=0x0600;SECURITY_WIN32;_CRT_SECURE_NO_WARNINGS;WIN32_LEAN_AND_MEAN;WINNT;DEBUG;WIN32S_COMPAT;PSWD="n0o614";_NO_OLDNAMES;NO_MULTIMON;NO_HTMLHELP;CURL_STATICLIB;NOMINMAX;%(PreprocessorDefinitions);_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;WINVER=0x0600;_WIN32_WINNT=0x0600;NOMINMAX;SECURITY_WIN32;_CRT_SECURE_NO_WARNINGS;WIN32_LEAN_AND_MEAN;WINNT;DEBUG;WIN32S_COMPAT;PSWD="n0o614";_NO_OLDNAMES;NO_MULTIMON;NO_HTMLHELP;CURL_STATICLIB;%(PreprocessorDefinitions);_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <CompileAs>CompileAsCpp</CompileAs>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -94,6 +94,7 @@
     <ClInclude Include="putty_global_config.h" />
     <ClInclude Include="putty_timer.h" />
     <ClInclude Include="putty_view.h" />
+    <ClInclude Include="RulesTable.hpp" />
     <ClInclude Include="window_interface.h" />
     <ClInclude Include="zmodem_file.h" />
   </ItemGroup>

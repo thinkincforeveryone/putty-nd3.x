@@ -39,6 +39,7 @@ public:
 	 * 
 	 * Any returned error message must be freed after use.
 	 */
+	virtual void *open_global_settings() = 0;
 	virtual void *open_settings_w(const char *sessionname, char **errmsg) = 0;
 	virtual void write_setting_s(void *handle, const char *key, const char *value) = 0;
 	virtual void write_setting_i(void *handle, const char *key, int value) = 0;
@@ -63,6 +64,7 @@ public:
 	 * read_setting_filename() and read_setting_fontspec() each read into
 	 * the provided buffer, and return zero if they failed to.
 	 */
+
 	virtual void *open_settings_r(const char *sessionname) = 0;
 	virtual char *read_setting_s(void *handle, const char *key, char *buffer, int buflen) = 0;
 	//virtual int open_read_settings_s(const char *key, const char *subkey, char *buffer, int buflen) = 0;
@@ -83,6 +85,12 @@ public:
 	virtual void *enum_settings_start(void) = 0;
 	virtual char *enum_settings_next(void *handle, char *buffer, int buflen) = 0;
 	virtual void enum_settings_finish(void *handle) = 0;
+
+	virtual void *enum_cmd_start(void) { return NULL; };
+	virtual char *enum_cmd_next(void *handle, char *buffer, int buflen) { return NULL; };
+	virtual void enum_cmd_finish(void *handle) { return; };
+
+	virtual void del_cmd_settings(const char *cmd_name) {};
 
 	/* ----------------------------------------------------------------------
 	 * Functions to access PuTTY's host key database.
@@ -136,13 +144,15 @@ class WinRegStore: public IStore
 {
 public:
 	static int open_read_settings_s(const char *key, const char *subkey, char *buffer, int buflen);
+
+	virtual void *open_global_settings();
 	virtual void *open_settings_w(const char *sessionname, char **errmsg) ;
 	virtual void write_setting_s(void *handle, const char *key, const char *value) ;
 	virtual void write_setting_i(void *handle, const char *key, int value) ;
 	virtual void write_setting_filename(void *handle, const char *key, Filename* value) ;
 	virtual void write_setting_fontspec(void *handle, const char *key, FontSpec* font) ;
 	virtual void close_settings_w(void *handle) ;
-	
+
 	virtual void *open_settings_r(const char *sessionname) ;
 	virtual char *read_setting_s(void *handle, const char *key, char *buffer, int buflen) ;
 	//virtual int open_read_settings_s(const char *key, const char *subkey, char *buffer, int buflen) ;
@@ -157,6 +167,11 @@ public:
 	virtual void *enum_settings_start(void) ;
 	virtual char *enum_settings_next(void *handle, char *buffer, int buflen) ;
 	virtual void enum_settings_finish(void *handle) ;
+
+	virtual void *enum_cmd_start(void);
+	virtual char *enum_cmd_next(void *handle, char *buffer, int buflen);
+	virtual void enum_cmd_finish(void *handle);
+	virtual void del_cmd_settings(const char *cmd_name);
 
 	virtual int verify_host_key(const char *hostname, int port,
 			    const char *keytype, const char *key) ;
@@ -182,6 +197,7 @@ public:
 	FileStore(){*pathM = 0;}
 	FileStore(const char* thePath){strncpy(pathM, thePath, sizeof(pathM));}
 	
+	virtual void *open_global_settings(){ return NULL; };
 	virtual void *open_settings_w(const char *sessionname, char **errmsg) ;
 	virtual void write_setting_s(void *handle, const char *key, const char *value) ;
 	virtual void write_setting_i(void *handle, const char *key, int value) ;
@@ -230,6 +246,7 @@ public:
 	MemStore(){ }
 	void input(const char* input);
 
+	virtual void *open_global_settings(){ return NULL; };
 	virtual void *open_settings_w(const char *sessionname, char **errmsg);
 	virtual void write_setting_s(void *handle, const char *key, const char *value);
 	virtual void write_setting_i(void *handle, const char *key, int value);
@@ -277,6 +294,7 @@ public:
 		: implStorageM(impl)
 	{ }
 
+	virtual void *open_global_settings(){ return NULL; };
 	virtual void *open_settings_w(const char *sessionname, char **errmsg);
 	virtual void write_setting_s(void *handle, const char *key, const char *value);
 	virtual void write_setting_i(void *handle, const char *key, int value);
@@ -298,6 +316,11 @@ public:
 	virtual void *enum_settings_start(void);
 	virtual char *enum_settings_next(void *handle, char *buffer, int buflen);
 	virtual void enum_settings_finish(void *handle);
+
+	virtual void *enum_cmd_start(void) { return implStorageM->enum_cmd_start(); }
+	virtual char *enum_cmd_next(void *handle, char *buffer, int buflen) {return implStorageM->enum_cmd_next(handle, buffer, buflen);}
+	virtual void enum_cmd_finish(void *handle) { return implStorageM->enum_cmd_finish(handle); }
+	virtual void del_cmd_settings(const char *cmd_name) { return implStorageM->del_cmd_settings(cmd_name); };
 
 	virtual int verify_host_key(const char *hostname, int port,
 		const char *keytype, const char *key);

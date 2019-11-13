@@ -31,6 +31,7 @@ const int ToolbarView::kStandardSpacing = 4;
 // The top of the toolbar has an edge we have to skip over in addition to the 4
 // px of spacing.
 const int ToolbarView::kVertSpacing = kStandardSpacing + 1;
+bool ToolbarView::is_show_ = true;
 // The edge graphics have some built-in spacing/shadowing, so we have to adjust
 // our spacing to make it still appear to be 4 px.
 static const int kEdgeSpacing = ToolbarView::kStandardSpacing - 1;
@@ -204,7 +205,7 @@ void ToolbarView::Init()
     shortcut_enabler_btn_->SetTooltipText(
         UTF16ToWide(ui::GetStringUTF16(IDS_TOOLTIP_SHORTCUT_ENABLER)));
     shortcut_enabler_btn_->SetAccessibleName(ui::GetStringUTF16(IDS_ACCNAME_SHORTCUT_ENABLER));
-    shortcut_enabler_btn_->set_id(VIEW_ID_CMD_SCATTER_BUTTON);
+    shortcut_enabler_btn_->set_id(VIEW_ID_SHORTCUT_ENABLER_BUTTON);
 
 	scroll_to_end_btn_ = new view::PressButton(this);
 	scroll_to_end_btn_->set_triggerable_event_flags(ui::EF_LEFT_BUTTON_DOWN |
@@ -223,6 +224,15 @@ void ToolbarView::Init()
         UTF16ToWide(ui::GetStringUTF16(IDS_TOOLTIP_CMD_SCATTER)));
     cmd_scatter_btn_->SetAccessibleName(ui::GetStringUTF16(IDS_ACCNAME_CMD_SCATTER));
     cmd_scatter_btn_->set_id(VIEW_ID_CMD_SCATTER_BUTTON);
+
+	cmd_dlg_btn_ = new view::ImageButton(this);
+	cmd_dlg_btn_->set_triggerable_event_flags(ui::EF_LEFT_BUTTON_DOWN |
+		ui::EF_MIDDLE_BUTTON_DOWN);
+	cmd_dlg_btn_->set_tag(IDC_CMD_DLG);
+	cmd_dlg_btn_->SetTooltipText(
+		UTF16ToWide(ui::GetStringUTF16(IDS_TOOLTIP_CMD_DLG)));
+	cmd_dlg_btn_->SetAccessibleName(ui::GetStringUTF16(IDS_ACCNAME_CMD_DLG));
+	cmd_dlg_btn_->set_id(VIEW_ID_CMD_DLG_BUTTON);
 
 	about_btn_ = new view::ImageButton(this);
     about_btn_->set_triggerable_event_flags(ui::EF_LEFT_BUTTON_DOWN |
@@ -292,6 +302,7 @@ void ToolbarView::Init()
     AddChildView(shortcut_enabler_btn_);
 	AddChildView(scroll_to_end_btn_);
     AddChildView(cmd_scatter_btn_);
+    AddChildView(cmd_dlg_btn_);
     AddChildView(about_btn_);
     AddChildView(search_previous_btn_);
     AddChildView(search_next_btn_);
@@ -523,6 +534,9 @@ bool ToolbarView::GetAcceleratorForCommandId(int command_id,
 
 gfx::Size ToolbarView::GetPreferredSize()
 {
+	if (!is_show_) {
+		return gfx::Size(0, kEdgeSpacing);
+	}
     if(IsDisplayModeNormal())
     {
         int min_width = kEdgeSpacing +
@@ -537,6 +551,7 @@ gfx::Size ToolbarView::GetPreferredSize()
 			shortcut_enabler_btn_->GetPreferredSize().width() + kButtonSpacing +
 			scroll_to_end_btn_->GetPreferredSize().width() + kButtonSpacing +
 			cmd_scatter_btn_->GetPreferredSize().width() + kButtonSpacing +
+			cmd_dlg_btn_->GetPreferredSize().width() + kButtonSpacing +
 			about_btn_->GetPreferredSize().width() + kButtonSpacing +
 			search_previous_btn_->GetPreferredSize().width() + kButtonSpacing +
 			search_next_btn_->GetPreferredSize().width() + kButtonSpacing +
@@ -635,7 +650,10 @@ void ToolbarView::Layout()
 	cmd_scatter_btn_->SetBounds(scroll_to_end_btn_->x() + scroll_to_end_btn_->width() + kButtonSpacing,
         child_y, cmd_scatter_btn_->GetPreferredSize().width(), child_height);
 
-	about_btn_->SetBounds(cmd_scatter_btn_->x() + cmd_scatter_btn_->width() + kButtonSpacing,
+	cmd_dlg_btn_->SetBounds(cmd_scatter_btn_->x() + cmd_scatter_btn_->width() + kButtonSpacing,
+        child_y, cmd_dlg_btn_->GetPreferredSize().width(), child_height);
+
+	about_btn_->SetBounds(cmd_dlg_btn_->x() + cmd_dlg_btn_->width() + kButtonSpacing,
         child_y, about_btn_->GetPreferredSize().width(), child_height);
 
 	int searchbar_x = this->width() - ( SEARCH_BAR_LENGTH
@@ -891,6 +909,11 @@ void ToolbarView::LoadImages()
 	scroll_to_end_btn_->SetImage(view::CustomButton::BS_DISABLED, tp->GetBitmapNamed(IDR_SCROLL_END_D));
 
 	cmd_scatter_btn_->updateIcon();
+
+	cmd_dlg_btn_->SetImage(view::CustomButton::BS_NORMAL, tp->GetBitmapNamed(IDR_CMD_DLG));
+	cmd_dlg_btn_->SetImage(view::CustomButton::BS_HOT, tp->GetBitmapNamed(IDR_CMD_DLG_H));
+	cmd_dlg_btn_->SetImage(view::CustomButton::BS_PUSHED, tp->GetBitmapNamed(IDR_CMD_DLG_P));
+	cmd_dlg_btn_->SetImage(view::CustomButton::BS_DISABLED, tp->GetBitmapNamed(IDR_CMD_DLG_D));
 	
 	about_btn_->SetImage(view::CustomButton::BS_NORMAL, tp->GetBitmapNamed(IDR_INFO));
 	about_btn_->SetImage(view::CustomButton::BS_HOT, tp->GetBitmapNamed(IDR_INFO_H));
