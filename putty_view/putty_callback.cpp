@@ -91,19 +91,19 @@ void process_init()
 	//for (int j = 0; j < lenof(popup_menus); j++) {
 
 	    AppendMenu(m, MF_SEPARATOR, 0, 0);
-	    AppendMenu(m, MF_ENABLED, IDM_NEWSESS, TEXT("Ne&w Session..."));
-	    AppendMenu(m, MF_ENABLED, IDM_DUPSESS, TEXT("&Duplicate Session"));
-	    AppendMenu(m, MF_ENABLED, IDM_RESTART, TEXT("Restart Sessions"));
+	    AppendMenu(m, MF_DISABLED, IDM_NEWSESS, TEXT("Ne&w Session..."));
+	    AppendMenu(m, MF_DISABLED, IDM_DUPSESS, TEXT("&Duplicate Session"));
+	    AppendMenu(m, MF_DISABLED, IDM_RESTART, TEXT("Restart Sessions"));
 	    AppendMenu(m, MF_ENABLED, IDM_RENAME, TEXT("Rename Tab Title..."));
-	    AppendMenu(m, MF_ENABLED, IDM_RECONF, TEXT("Chan&ge Settings..."));
+	    AppendMenu(m, MF_DISABLED, IDM_RECONF, TEXT("Chan&ge Settings..."));
         AppendMenu(m, MF_SEPARATOR, 0, 0);
-        AppendMenu(m, MF_ENABLED | MF_UNCHECKED, IDM_START_STOP_LOG, TEXT("&Start Logging"));
-	    AppendMenu(m, MF_ENABLED, IDM_SHOWLOG, TEXT("&Event Log..."));
+        AppendMenu(m, MF_DISABLED | MF_CHECKED, IDM_START_STOP_LOG, TEXT("&Start Logging"));
+	    AppendMenu(m, MF_DISABLED, IDM_SHOWLOG, TEXT("&Event Log..."));
 	    AppendMenu(m, MF_SEPARATOR, 0, 0);
 	    AppendMenu(m, MF_ENABLED, IDM_CLRSB, TEXT("C&lear Scrollback"));
-	    AppendMenu(m, MF_ENABLED, IDM_RESET, TEXT("Rese&t Terminal"));
+	    AppendMenu(m, MF_DISABLED, IDM_RESET, TEXT("Rese&t Terminal"));
 	    AppendMenu(m, MF_SEPARATOR, 0, 0);
-	    AppendMenu(m, MF_ENABLED, IDM_SHOW_CMD_DLG, TEXT("Show Command Dialog..."));
+	    AppendMenu(m, MF_DISABLED, IDM_SHOW_CMD_DLG, TEXT("Show Command Dialog..."));
 	    //AppendMenu(m, (cfg.resize_action == RESIZE_DISABLED) ?
 		//       MF_GRAYED : MF_ENABLED, IDM_FULLSCREEN, "&Full Screen");
 	    //AppendMenu(m, MF_SEPARATOR, 0, 0);
@@ -116,7 +116,7 @@ void process_init()
     
 	gUITimer.Start(base::TimeDelta::FromMilliseconds(100), g_ui_processor, &Processor::WinWorker::process_ui_jobs);
 	int is_show_toolbar = load_global_isetting(IF_SHOW_TOOLBAR_SETTING, 1);
-	ToolbarView::is_show_ = (is_show_toolbar != 0);
+	ToolbarView::is_show_ = false; // (is_show_toolbar != 0);
 	WindowInterface::GetInstance()->AllToolbarSizeChanged(true);
 	PuttyGlobalConfig::GetInstance()->initShortcutRules();
 }
@@ -1398,6 +1398,7 @@ void notify_remote_exit(void *frontend)
 			term_data(puttyController->term, 1, str, strlen(str));
 		//MessageBox(WindowInterface::GetInstance()->getNativeTopWnd(), L"Connection closed by remote host",
 		//	   A2W(appname), MB_OK | MB_ICONINFORMATION);
+			WindowInterface::GetInstance()->getBrowserView()->Close();
 	    }
 	}
     }

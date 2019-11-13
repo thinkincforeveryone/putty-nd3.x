@@ -2287,6 +2287,7 @@ int verify_ssh_host_key(void *frontend, char *host, int port,
 	assert(mbret==IDYES || mbret==IDNO || mbret==IDCANCEL);
 	sfree(text);
 	sfree(caption);
+
 	if (mbret == IDYES) {
 	    gStorage->store_host_key(host, port, keytype, keystr);
 	    return 1;
@@ -2294,14 +2295,17 @@ int verify_ssh_host_key(void *frontend, char *host, int port,
 	    return 1;
     } else if (ret == 1) {	       /* key was absent */
 	int mbret;
-	char *text = dupprintf(absentmsg, keytype, fingerprint, appname);
+	/*char *text = dupprintf(absentmsg, keytype, fingerprint, appname);
 	char *caption = dupprintf(mbtitle, appname);
 	mbret = message_box(text, caption,
 			    MB_ICONWARNING | MB_YESNOCANCEL | MB_DEFBUTTON3,
 			    HELPCTXID(errors_hostkey_absent));
 	assert(mbret==IDYES || mbret==IDNO || mbret==IDCANCEL);
 	sfree(text);
-	sfree(caption);
+	sfree(caption);*/
+	gStorage->store_host_key(host, port, keytype, keystr);
+	return 1;
+
 	if (mbret == IDYES) {
 	    gStorage->store_host_key(host, port, keytype, keystr);
 	    return 1;
@@ -2358,16 +2362,17 @@ int askappend(void *frontend, Filename *filename,
     char *mbtitle;
     int mbret;
 
-    message = dupprintf(msgtemplate, FILENAME_MAX, filename->path);
-    mbtitle = dupprintf("%s Log to File", appname);
+  //  message = dupprintf(msgtemplate, FILENAME_MAX, filename->path);
+  //  mbtitle = dupprintf("%s Log to File", appname);
 
-    mbret = MessageBox(NULL, message, mbtitle,
-		MB_ICONQUESTION | MB_YESNOCANCEL | MB_DEFBUTTON3 | MB_TOPMOST);
+  //  mbret = MessageBox(NULL, message, mbtitle,
+		//MB_ICONQUESTION | MB_YESNOCANCEL | MB_DEFBUTTON3 | MB_TOPMOST);
 
     socket_reselect_all();
 
-    sfree(message);
-    sfree(mbtitle);
+    //sfree(message);
+    //sfree(mbtitle);
+	return 2;
 
     if (mbret == IDYES)
 	return 2;
